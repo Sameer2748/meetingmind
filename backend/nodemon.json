@@ -1,0 +1,13 @@
+{
+    "verbose": true,
+    "ignore": [
+        "**/node_modules/**",
+        "**/recordings/**",
+        "**/temp/**",
+        "**/bot_sessions/**",
+        "**/*.webm",
+        "**/*.png",
+        "**/*.json"
+    ],
+    "delay": "2500"
+}
