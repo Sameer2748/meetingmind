@@ -1,0 +1,132 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: 0 84.2% 60.2%;
+  --color-destructive-foreground: 0 0% 98%;
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--primary);
+
+  --radius-lg: 1rem;
+  --radius-md: 0.75rem;
+  --radius-sm: 0.5rem;
+
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+
+  @keyframes accordion-down {
+    from {
+      height: 0;
+    }
+
+    to {
+      height: var(--radix-accordion-content-height);
+    }
+  }
+
+  @keyframes accordion-up {
+    from {
+      height: var(--radix-accordion-content-height);
+    }
+
+    to {
+      height: 0;
+    }
+  }
+}
+
+@layer base {
+  :root {
+    --background: #f1efd8;
+    --foreground: #01114f;
+    --card: #ffffff;
+    --card-foreground: #01114f;
+    --popover: #ffffff;
+    --popover-foreground: #01114f;
+    --primary: #e07155;
+    --primary-foreground: #ffffff;
+    --secondary: #01114f;
+    --secondary-foreground: #ffffff;
+    --muted: #f5f5f5;
+    --muted-foreground: #8a8a8a;
+    --accent: #f5f5f5;
+    --accent-foreground: #01114f;
+    --border: #d4d2bb;
+    --input: #d4d2bb;
+  }
+
+  .dark {
+    --background: #0a0b0f;
+    --foreground: #ffffff;
+    --card: #16171f;
+    --card-foreground: #ffffff;
+    --popover: #16171f;
+    --popover-foreground: #ffffff;
+    --primary: #e07155;
+    --primary-foreground: #ffffff;
+    --secondary: #01114f;
+    --secondary-foreground: #ffffff;
+    --muted: #1f2028;
+    --muted-foreground: #6b6b6b;
+    --accent: #1f2028;
+    --accent-foreground: #ffffff;
+    --border: #292a36;
+    --input: #292a36;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground transition-colors duration-300;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+.glass-effect {
+  @apply bg-black/5 dark:bg-white/5 backdrop-blur-md border border-black/10 dark:border-white/10;
+}
+
+/* Theme Switch View Transition */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-new(root) {
+  z-index: 9999;
+  animation: expand-circle 0.6s ease-in-out forwards;
+  clip-path: circle(0% at var(--click-x, 50%) var(--click-y, 50%));
+}
+
+::view-transition-old(root) {
+  z-index: 1;
+}
+
+@keyframes expand-circle {
+  0% {
+    clip-path: circle(0% at var(--click-x, 50%) var(--click-y, 50%));
+  }
+
+  100% {
+    clip-path: circle(150% at var(--click-x, 50%) var(--click-y, 50%));
+  }
+}
