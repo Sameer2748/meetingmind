@@ -283,12 +283,12 @@ async function handleSaveRecording(message) {
   // ── Trigger Transcription with AssemblyAI ─────────────
   const syncData = await chrome.storage.sync.get('assemblyaiKey')
   if (!syncData.assemblyaiKey) {
-    console.log('[Background] ⚠️ No AssemblyAI key — skipping transcription')
+    console.log('[Background] 🧠 Local transcription skipped (managed by backend)')
     if (sessionData.recordingTabId) {
       chrome.tabs.sendMessage(sessionData.recordingTabId, {
         action: 'TRANSCRIPTION_STATUS',
-        status: 'no_key',
-        message: 'Add AssemblyAI key in settings for auto-transcription'
+        status: 'completed',
+        message: 'Recording saved! Transcription in progress on server...'
       }).catch(() => { })
     }
     return

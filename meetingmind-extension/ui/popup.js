@@ -9,47 +9,10 @@ const btnStop = document.getElementById('btn-stop')
 const meetingTitle = document.getElementById('meeting-title')
 const recordingTitle = document.getElementById('recording-title')
 const timerEl = document.getElementById('timer')
-const settingsBtn = document.getElementById('settings-btn')
-const settingsPanel = document.getElementById('settings-panel')
-const apiKeyInput = document.getElementById('api-key-input')
-const btnSaveKey = document.getElementById('btn-save-key')
-const keyStatus = document.getElementById('key-status')
 
 let timerInterval = null
 
-// ── Settings Toggle ─────────────────────────────────────
-settingsBtn.addEventListener('click', () => {
-    settingsPanel.classList.toggle('hidden')
-})
 
-// ── Load saved API key ──────────────────────────────────
-chrome.storage.sync.get('assemblyaiKey', (data) => {
-    if (data.assemblyaiKey) {
-        apiKeyInput.value = data.assemblyaiKey
-        keyStatus.innerHTML = '<span style="color: #10b981">✅ Key saved</span>'
-    } else {
-        keyStatus.innerHTML = '<span style="color: #f59e0b">⚠️ No key — transcription disabled</span>'
-    }
-})
-
-// ── Save API key ────────────────────────────────────────
-btnSaveKey.addEventListener('click', () => {
-    const key = apiKeyInput.value.trim()
-    if (!key) {
-        keyStatus.innerHTML = '<span style="color: #ef4444">❌ Please enter a key</span>'
-        return
-    }
-
-    btnSaveKey.disabled = true
-    btnSaveKey.textContent = 'Saving...'
-
-    chrome.storage.sync.set({ assemblyaiKey: key }, () => {
-        keyStatus.innerHTML = '<span style="color: #10b981">✅ Key saved successfully!</span>'
-        btnSaveKey.disabled = false
-        btnSaveKey.textContent = 'Save Key'
-        setTimeout(() => settingsPanel.classList.add('hidden'), 1000)
-    })
-})
 
 // ── Auth Handling ──────────────────────────────────────
 const loggedOutView = document.getElementById('logged-out-view')
