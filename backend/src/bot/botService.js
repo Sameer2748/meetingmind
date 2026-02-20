@@ -159,6 +159,7 @@ class BotService {
                 // ═══════════════════════════════════════════
                 if (state === 'WAITING_ADMIT') {
                     console.log(`[BotService] [WAIT] In lobby — waiting for host to admit... (${i + 1}/30)`);
+                    this.updateBotStatus(meetingUrl, 'waiting_admit');
                     await new Promise(r => setTimeout(r, 5000));
                     continue;
                 }
@@ -327,18 +328,27 @@ class BotService {
                 await new Promise(r => setTimeout(r, 4000));
             }
 
-            this.activeBots.set(meetingUrl, { browser, page, fileStream, recordingPath, userEmail, sessionDir });
-            this.handleRecording(page);
+            this.activeBots.set(meetingUrl, {
+                browser,
+                page,
+                fileStream,
+                recordingPath,
+                userEmail,
+                sessionDir,
+                status: 'joining'
+            });
+            this.handleRecording(page, meetingUrl);
 
         } catch (err) {
             console.error('[BotService] Error:', err.message);
         }
     }
 
-    async handleRecording(page) {
+    async handleRecording(page, meetingUrl) {
         try {
             await page.waitForSelector('[aria-label="Leave call"], [aria-label="Leave meeting"]', { timeout: 600000 });
             console.log('[BotService] [SUCCESS] ADMITTED! Recording active.');
+            this.updateBotStatus(meetingUrl, 'recording');
 
             // Mark start time for duration calculation fallback
             for (const [url, bot] of this.activeBots.entries()) {
@@ -594,6 +604,18 @@ class BotService {
 
             this.activeBots.delete(meetingUrl);
         }
+    }
+    updateBotStatus(meetingUrl, status) {
+        const bot = this.activeBots.get(meetingUrl);
+        if (bot) {
+            bot.status = status;
+            console.log(`[BotService] [STATUS] Updated bot status for ${meetingUrl} to ${status}`);
+        }
+    }
+
+    getBotStatus(meetingUrl) {
+        const bot = this.activeBots.get(meetingUrl);
+        return bot ? bot.status : 'not_found';
     }
 }
 

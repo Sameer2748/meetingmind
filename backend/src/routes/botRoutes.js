@@ -29,6 +29,14 @@ router.post('/join', authenticate, async (req, res) => {
     }
 });
 
+router.get('/status', authenticate, async (req, res) => {
+    const { meetingUrl } = req.query;
+    if (!meetingUrl) return res.status(400).json({ error: 'meetingUrl is required' });
+
+    const status = botService.getBotStatus(meetingUrl);
+    res.json({ success: true, status });
+});
+
 router.post('/stop', authenticate, async (req, res) => {
     const { meetingUrl } = req.body;
     try {

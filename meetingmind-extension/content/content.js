@@ -4,8 +4,8 @@ console.log('[Content] ========== MeetingMind loaded ==========')
 let isOnMeetPage = false
 let wasInMeeting = false
 let overlayEl = null
-let timerInterval = null
 let isRecording = false
+let botStatusInterval = null
 
 // ── Toolbar Button Injection (Fathom Style) ─────────────────
 function injectToolbarButton() {
@@ -76,9 +76,10 @@ function injectToolbarButton() {
                     meetingTitle: title
                 }, (response) => {
                     if (response?.ok) {
-                        isRecording = true;
+                        isRecording = true; // Still using this for UI state purposes
                         updateUIState();
-                        showOverlay('recording');
+                        showOverlay('joining');
+                        startBotStatusPolling();
                     }
                 });
             } else {
@@ -87,6 +88,7 @@ function injectToolbarButton() {
                     meetingUrl: window.location.href
                 }, () => {
                     isRecording = false;
+                    stopBotStatusPolling();
                     updateUIState();
                     showOverlay('saved');
                     setTimeout(() => removeOverlay(), 4000);
@@ -107,18 +109,20 @@ function showOverlay(state) {
 
     const isRecording = state === 'recording';
     const isSaved = state === 'saved';
+    const isWaiting = state === 'waiting_admit';
+    const isJoining = state === 'joining';
 
     overlayEl.innerHTML = `
         <div style="background: rgba(241, 239, 216, 0.95); backdrop-filter: blur(12px); padding: 16px 24px; border-radius: 20px; border: 1px solid rgba(224, 113, 85, 0.4); box-shadow: 0 20px 40px rgba(1, 17, 79, 0.2); display: flex; align-items: center; gap: 16px; min-width: 280px; transition: 0.3s; pointer-events: auto;">
-            <div style="width: 44px; height: 44px; background: ${isSaved ? '#10b981' : '#e07155'}; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 22px; box-shadow: 0 0 15px rgba(224, 113, 85, 0.2);">
+            <div style="width: 44px; height: 44px; background: ${isSaved ? '#10b981' : (isRecording ? '#e07155' : '#3b82f6')}; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 22px; box-shadow: 0 0 15px rgba(224, 113, 85, 0.2);">
                 ${isSaved ? '✅' : '🤖'}
             </div>
             <div style="display: flex; flex-direction: column;">
                 <div style="color: #01114f; font-weight: 800; font-size: 15px; letter-spacing: 0.5px; margin-bottom: 2px;">
-                    ${isSaved ? 'MEETING SAVED' : (isRecording ? 'LIVE RECORDING' : 'BOT JOINING...')}
+                    ${isSaved ? 'MEETING SAVED' : (isRecording ? 'LIVE RECORDING' : (isWaiting ? 'WAITING FOR HOST' : 'BOT JOINING...'))}
                 </div>
                 <div style="color: #01114f; opacity: 0.6; font-size: 13px;">
-                    ${isSaved ? 'Audio saved to backend folder' : (isRecording ? 'MeetingMind is listening...' : 'Please admit the bot now')}
+                    ${isSaved ? 'Audio saved to backend folder' : (isRecording ? 'MeetingMind is listening...' : (isWaiting ? 'Please admit the bot now' : 'Launching AI notetaker...'))}
                 </div>
             </div>
             ${isRecording ? '<div style="width: 10px; height: 10px; background: #e07155; border-radius: 50%; animation: pulse 1s infinite; margin-left: auto;"></div>' : ''}
@@ -134,6 +138,41 @@ function removeOverlay() {
     if (overlayEl) {
         overlayEl.remove();
         overlayEl = null;
+    }
+}
+
+// ── Bot Status Polling ──────────────────────────────────────
+function startBotStatusPolling() {
+    if (botStatusInterval) clearInterval(botStatusInterval);
+    botStatusInterval = setInterval(() => {
+        chrome.runtime.sendMessage({
+            action: 'GET_BOT_STATUS',
+            meetingUrl: window.location.href
+        }, (res) => {
+            if (res?.ok && res.status) {
+                if (res.status === 'recording') {
+                    showOverlay('recording');
+                    stopBotStatusPolling();
+                } else if (res.status === 'waiting_admit') {
+                    showOverlay('waiting_admit');
+                } else if (res.status === 'joining') {
+                    showOverlay('joining');
+                } else if (res.status === 'not_found' && isRecording) {
+                    // Bot probably died or finished
+                    isRecording = false;
+                    updateUIState();
+                    removeOverlay();
+                    stopBotStatusPolling();
+                }
+            }
+        });
+    }, 2000);
+}
+
+function stopBotStatusPolling() {
+    if (botStatusInterval) {
+        clearInterval(botStatusInterval);
+        botStatusInterval = null;
     }
 }
 
@@ -158,6 +197,7 @@ chrome.runtime.sendMessage({ action: 'GET_RECORDING_STATE' }, (state) => {
     if (state?.isRecording) {
         isRecording = true;
         updateUIState();
+        startBotStatusPolling();
     }
 });
 

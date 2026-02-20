@@ -121,6 +121,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     })
     return true
 
+  } else if (message.action === 'GET_BOT_STATUS') {
+    chrome.storage.local.get('authToken', (data) => {
+      fetch(`http://localhost:5001/api/bot/status?meetingUrl=${encodeURIComponent(message.meetingUrl)}`, {
+        headers: {
+          'Authorization': `Bearer ${data.authToken || ''}`
+        }
+      })
+        .then(res => res.json())
+        .then(data => sendResponse({ ok: true, status: data.status }))
+        .catch(err => sendResponse({ ok: false, error: err.message }))
+    })
+    return true
+
   } else {
     sendResponse({ ok: true })
   }
