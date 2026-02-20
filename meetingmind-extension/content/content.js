@@ -61,6 +61,9 @@ function injectToolbarButton() {
     btn.onclick = (e) => {
         e.stopPropagation();
         e.preventDefault();
+
+        if (btn.disabled) return;
+
         chrome.storage.local.get('userEmail', (data) => {
             if (!data.userEmail) {
                 alert('Please sign in via the MeetingMind extension popup before recording.');
@@ -69,24 +72,35 @@ function injectToolbarButton() {
 
             if (!isRecording) {
                 const title = document.title?.replace(' - Google Meet', '').trim() || 'Meeting';
-                btn.style.boxShadow = '0 0 10px rgba(59, 130, 246, 0.4)';
+                btn.disabled = true;
+                btn.style.opacity = '0.7';
+
                 chrome.runtime.sendMessage({
                     action: 'START_BOT',
                     meetingUrl: window.location.href,
                     meetingTitle: title
                 }, (response) => {
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
                     if (response?.ok) {
-                        isRecording = true; // Still using this for UI state purposes
+                        isRecording = true;
                         updateUIState();
                         showOverlay('joining');
                         startBotStatusPolling();
+                    } else if (response?.error === 'Already recording') {
+                        isRecording = true;
+                        updateUIState();
                     }
                 });
             } else {
+                btn.disabled = true;
+                btn.style.opacity = '0.7';
                 chrome.runtime.sendMessage({
                     action: 'STOP_BOT',
                     meetingUrl: window.location.href
                 }, () => {
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
                     isRecording = false;
                     stopBotStatusPolling();
                     updateUIState();
@@ -185,10 +199,12 @@ function updateUIState() {
 
     if (isRecording) {
         dot.style.display = 'block';
-        btn.style.boxShadow = '0 0 12px rgba(59, 130, 246, 0.4)';
+        btn.style.borderColor = '#e07155';
+        btn.style.boxShadow = '0 0 15px rgba(224, 113, 85, 0.2)';
     } else {
         dot.style.display = 'none';
-        btn.style.boxShadow = 'none';
+        btn.style.borderColor = 'rgba(1, 11, 79, 0.1)';
+        btn.style.boxShadow = '0 4px 12px rgba(1, 11, 79, 0.05)';
     }
 }
 

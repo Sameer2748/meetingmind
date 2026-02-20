@@ -52,43 +52,52 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   } else if (message.action === 'START_BOT') {
     console.log('[Background] 🤖 Requesting bot join for:', message.meetingUrl)
 
-    // Update session state so popup shows recording
-    const startTime = Date.now();
-    chrome.storage.session.set({
-      isRecording: true,
-      recordingStartTime: startTime,
-      recordingTitle: message.meetingTitle || 'Meeting',
-      recordingType: 'BOT'
-    });
+    chrome.storage.session.get(['isRecording', 'recordingUrl'], (session) => {
+      if (session.isRecording && session.recordingUrl === message.meetingUrl) {
+        console.log('[Background] ⚠️ Recording already in progress for this meeting.');
+        sendResponse({ ok: false, error: 'Already recording' });
+        return;
+      }
 
-    chrome.action.setBadgeText({ text: 'BOT' })
-    chrome.action.setBadgeBackgroundColor({ color: '#3b82f6' })
+      // Update session state so popup shows recording
+      const startTime = Date.now();
+      chrome.storage.session.set({
+        isRecording: true,
+        recordingStartTime: startTime,
+        recordingTitle: message.meetingTitle || 'Meeting',
+        recordingUrl: message.meetingUrl,
+        recordingType: 'BOT'
+      });
 
-    // Get user email and token to associate with recording
-    chrome.storage.local.get(['userEmail', 'authToken'], (data) => {
-      const userEmail = data.userEmail || 'anonymous';
-      const authToken = data.authToken || '';
+      chrome.action.setBadgeText({ text: 'BOT' })
+      chrome.action.setBadgeBackgroundColor({ color: '#3b82f6' })
 
-      fetch('http://localhost:5001/api/bot/join', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authToken}`
-        },
-        body: JSON.stringify({
-          meetingUrl: message.meetingUrl,
-          userEmail: userEmail
+      // Get user email and token to associate with recording
+      chrome.storage.local.get(['userEmail', 'authToken'], (data) => {
+        const userEmail = data.userEmail || 'anonymous';
+        const authToken = data.authToken || '';
+
+        fetch('http://localhost:5001/api/bot/join', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+          },
+          body: JSON.stringify({
+            meetingUrl: message.meetingUrl,
+            userEmail: userEmail
+          })
         })
+          .then(res => res.json())
+          .then(data => sendResponse({ ok: true, data }))
+          .catch(err => {
+            console.error('[Background] 🤖 Bot start failed:', err)
+            // Revert state on error
+            chrome.storage.session.set({ isRecording: false, recordingUrl: null });
+            chrome.action.setBadgeText({ text: '' })
+            sendResponse({ ok: false, error: err.message })
+          })
       })
-        .then(res => res.json())
-        .then(data => sendResponse({ ok: true, data }))
-        .catch(err => {
-          console.error('[Background] 🤖 Bot start failed:', err)
-          // Revert state on error
-          chrome.storage.session.set({ isRecording: false });
-          chrome.action.setBadgeText({ text: '' })
-          sendResponse({ ok: false, error: err.message })
-        })
     })
     return true
 
