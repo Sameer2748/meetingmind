@@ -1,0 +1,44 @@
+{
+    "name": "meetingmind",
+    "version": "1.0.0",
+    "manifest_version": 3,
+    "background": {
+        "service_worker": "worker/background.js"
+    },
+    "content_scripts": [
+        {
+            "run_at": "document_idle",
+            "js": [
+                "content/content.js"
+            ],
+            "css": [
+                "content/overlay.css"
+            ],
+            "matches": [
+                "https://meet.google.com/*"
+            ]
+        }
+    ],
+    "action": {
+        "default_popup": "ui/popup.html",
+        "default_icon": {
+            "16": "assets/icon16.png",
+            "128": "assets/icon128.png"
+        }
+    },
+    "permissions": [
+        "tabs",
+        "activeTab",
+        "storage",
+        "notifications",
+        "scripting",
+        "tabCapture",
+        "offscreen",
+        "downloads",
+        "identity"
+    ],
+    "host_permissions": [
+        "https://meet.google.com/*",
+        "http://localhost:5001/*"
+    ]
+}
