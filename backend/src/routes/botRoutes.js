@@ -52,9 +52,14 @@ router.get('/status', authenticate, async (req, res) => {
     const { meetingUrl } = req.query;
     if (!meetingUrl) return res.status(400).json({ error: 'meetingUrl is required' });
 
-    // In a scalable arch, status comes from the shared database
-    const status = await botService.getBotStatus(meetingUrl);
-    res.json({ success: true, status });
+    // In a scalable arch, status comes from Redis (real-time)
+    try {
+        const status = await connection.get(`bot-status:${meetingUrl}`);
+        res.json({ success: true, status: status || 'not_found' });
+    } catch (err) {
+        console.error('[Server] Redis status check failed:', err);
+        res.status(500).json({ error: 'Failed to check bot status' });
+    }
 });
 
 router.post('/stop', authenticate, async (req, res) => {

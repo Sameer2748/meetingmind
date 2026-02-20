@@ -1,0 +1,8 @@
+node_modules
+.git
+.DS_Store
+bot_sessions
+recordings
+dist
+build
+.next

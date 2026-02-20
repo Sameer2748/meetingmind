@@ -6,6 +6,13 @@ const storageService = require('./services/storageService');
 const transcriptionService = require('./services/transcriptionService');
 const dbService = require('./services/dbService');
 const mm = require('music-metadata');
+const IORedis = require('ioredis');
+
+// Setup Redis for Status
+const redis = new IORedis({
+    host: process.env.REDIS_HOST || 'localhost',
+    port: process.env.REDIS_PORT || 6379,
+});
 
 puppeteer.use(StealthPlugin());
 
@@ -27,7 +34,7 @@ class BotService {
 
         try {
             const browser = await puppeteer.launch({
-                executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+                executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
                 headless: false,
                 userDataDir: sessionDir,
                 ignoreDefaultArgs: ['--enable-automation'],
@@ -605,11 +612,18 @@ class BotService {
             this.activeBots.delete(meetingUrl);
         }
     }
-    updateBotStatus(meetingUrl, status) {
+    async updateBotStatus(meetingUrl, status) {
         const bot = this.activeBots.get(meetingUrl);
         if (bot) {
             bot.status = status;
             console.log(`[BotService] [STATUS] Updated bot status for ${meetingUrl} to ${status}`);
+
+            // Write to Redis for Backend to read
+            try {
+                await redis.set(`bot-status:${meetingUrl}`, status, 'EX', 3600); // 1 hour expiry
+            } catch (e) {
+                console.error('[BotService] Redis status update failed:', e.message);
+            }
         }
     }
 
