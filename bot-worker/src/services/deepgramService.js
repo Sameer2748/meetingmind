@@ -19,21 +19,49 @@ class DeepgramService {
         try {
             const audioData = fs.readFileSync(localPath);
 
-            const response = await axios.post(
-                'https://api.deepgram.com/v1/listen?smart_format=true&diarize=true&model=nova-2&detect_language=true&punctuate=true&paragraphs=true',
-                audioData,
-                {
+            let transcriptUrl = 'https://api.deepgram.com/v1/listen?smart_format=true&diarize=true&model=nova-2&punctuate=true&paragraphs=true&filler_words=true&detect_language=true';
+
+            let response = await axios.post(transcriptUrl, audioData, {
+                headers: {
+                    'Authorization': `Token ${apiKey}`,
+                    'Content-Type': 'application/octet-stream'
+                }
+            });
+
+            let result = response.data;
+            let alternative = result.results.channels[0].alternatives[0];
+
+            // SMART RETRY: If Deepgram detected 'en' but found 0 words, retry with Hindi
+            // This is common for Hinglish/Indian accents where detection fails but speech is present.
+            if ((!alternative.transcript || alternative.transcript.trim().length === 0) && result.metadata.duration > 3) {
+                console.log(`[DeepgramService] [RETRY] Detected ${result.results.channels[0].detected_language} but transcript is empty. Retrying with Hindi (hi) model...`);
+                const retryUrl = 'https://api.deepgram.com/v1/listen?smart_format=true&diarize=true&model=nova-2&punctuate=true&paragraphs=true&filler_words=true&language=hi';
+                const retryRes = await axios.post(retryUrl, audioData, {
                     headers: {
                         'Authorization': `Token ${apiKey}`,
                         'Content-Type': 'application/octet-stream'
                     }
-                }
-            );
+                });
 
-            const result = response.data;
+                if (retryRes.data.results.channels[0].alternatives[0].transcript) {
+                    result = retryRes.data;
+                    alternative = result.results.channels[0].alternatives[0];
+                    console.log(`[DeepgramService] [SUCCESS] Retry with Hindi worked! (Words: ${alternative.words.length})`);
+                }
+            }
+
+            const words = alternative.words || [];
+
             return {
-                text: result.results.channels[0].alternatives[0].transcript,
-                formatted: this.formatTranscript(result),
+                text: alternative.transcript || "",
+                formatted: words.length > 0 ? this.formatTranscript(result) : (alternative.transcript || ""),
+                words: words.map(w => ({
+                    word: w.punctuated_word || w.word,
+                    start: w.start,
+                    end: w.end,
+                    speaker: w.speaker,
+                    confidence: w.confidence
+                })),
                 raw: result
             };
 
@@ -60,7 +88,7 @@ class DeepgramService {
                 const timestamp = `[${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}]`;
                 transcript += `\n\n${timestamp} Speaker ${currentSpeaker}: `;
             }
-            transcript += word.punctuated_word || word.word + " ";
+            transcript += (word.punctuated_word || word.word) + " ";
         });
 
         return transcript;

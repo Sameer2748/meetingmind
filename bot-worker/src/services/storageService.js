@@ -11,7 +11,7 @@ class StorageService {
                 secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
             },
         });
-        this.bucketName = process.env.AWS_BUCKET_NAME;
+        this.bucketName = process.env.S3_BUCKET_NAME || process.env.AWS_BUCKET_NAME;
     }
 
     async uploadRecording(filePath, userEmail) {

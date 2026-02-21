@@ -1,8 +1,8 @@
 // bot-worker/src/worker.js
+require('dotenv').config();
 const { Worker } = require('bullmq');
 const IORedis = require('ioredis');
 const botService = require('./botService');
-require('dotenv').config();
 
 const connection = new IORedis({
     host: process.env.REDIS_HOST || 'localhost',
