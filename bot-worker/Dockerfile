@@ -1,5 +1,5 @@
 # bot-worker/Dockerfile
-FROM node:18-slim
+FROM node:20-slim
 
 # Install system dependencies for Puppeteer & Chromium
 # We use Chromium because it supports both x86_64 and arm64 (Apple Silicon) natively in Debian
@@ -50,6 +50,8 @@ RUN apt-get update && apt-get install -y \
     fonts-thai-tlwg \
     fonts-kacst \
     fonts-freefont-ttf \
+    xvfb \
+    xauth \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
@@ -64,4 +66,7 @@ COPY . .
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
-CMD ["npm", "start"]
+# Ensure the start script is executable
+RUN chmod +x start.sh
+
+CMD ["./start.sh"]

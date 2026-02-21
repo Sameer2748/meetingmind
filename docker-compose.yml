@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: password
       POSTGRES_DB: meetingmind
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
@@ -18,24 +18,6 @@ services:
     container_name: meetingmind-redis
     ports:
       - "6379:6379"
-
-  backend:
-    build: ./backend
-    container_name: meetingmind-backend
-    volumes:
-      - ./backend:/app
-      - /app/node_modules
-    ports:
-      - "5001:5001"
-    environment:
-      - DATABASE_URL=postgresql://user:password@postgres:5432/meetingmind
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - JWT_SECRET=supersecret
-      - PORT=5001
-    depends_on:
-      - postgres
-      - redis
 
   bot-worker:
     build: ./bot-worker
@@ -51,23 +33,11 @@ services:
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_REGION=${AWS_REGION}
       - S3_BUCKET_NAME=${S3_BUCKET_NAME}
+      - AWS_BUCKET_NAME=${S3_BUCKET_NAME}
       - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
     depends_on:
       - postgres
       - redis
-
-  frontend:
-    build: ./frontend
-    container_name: meetingmind-frontend
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    ports:
-      - "3000:3000"
-    environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:5001/api
-    depends_on:
-      - backend
 
 volumes:
   postgres_data:
