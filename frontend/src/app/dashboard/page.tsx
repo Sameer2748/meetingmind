@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
     Clock,
-    Calendar,
+    Calendar as CalendarIcon,
     Plus,
     Search,
     Play,
@@ -15,7 +15,8 @@ import {
     Trash2,
     BarChart3,
     ChevronRight,
-    AlertCircle
+    AlertCircle,
+    X
 } from "lucide-react";
 import { SidebarProvider, SidebarTrigger, SidebarInset, SidebarRail } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
@@ -35,10 +36,91 @@ import {
 } from "@/components/ui/dialog";
 import { tokenManager } from "@/lib/auth/tokenManager";
 import { recordingsAPI } from "@/lib/api";
-import { format } from "date-fns";
+import { format, isSameDay } from "date-fns";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+
+// ─── Compact Waveform Seek Bar for Dashboard Cards ─────────────────────────────
+
+const CARD_WAVEFORM_BARS = [
+    6, 10, 16, 12, 18, 24, 14, 20, 28, 16, 12, 22, 18, 26, 14, 10, 20, 24, 16, 12,
+    18, 28, 22, 14, 10, 16, 24, 20, 12, 18,
+];
+
+function CardWaveformSeekBar({
+    currentTime,
+    duration,
+    onSeek,
+    color = "#e07155",
+}: {
+    currentTime: number;
+    duration: number;
+    onSeek: (e: React.ChangeEvent<HTMLInputElement>) => void;
+    color?: string;
+}) {
+    const progress = duration > 0 ? currentTime / duration : 0;
+
+    return (
+        <div style={{ position: "relative", width: "100%", userSelect: "none" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 2, height: 32, width: "100%" }}>
+                {CARD_WAVEFORM_BARS.map((h, i) => {
+                    const barProgress = i / CARD_WAVEFORM_BARS.length;
+                    const filled = barProgress < progress;
+                    const halfH = Math.max(h / 2, 2);
+
+                    return (
+                        <div
+                            key={i}
+                            style={{
+                                flex: 1,
+                                display: "flex",
+                                flexDirection: "column",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                height: "100%",
+                            }}
+                        >
+                            <div style={{
+                                width: "100%",
+                                height: halfH,
+                                background: filled ? color : "rgba(150,150,150,0.18)",
+                                borderRadius: "9999px 9999px 0 0",
+                                transition: "background 0.08s ease",
+                            }} />
+                            <div style={{
+                                width: "100%",
+                                height: halfH,
+                                background: filled ? color : "rgba(150,150,150,0.18)",
+                                borderRadius: "0 0 9999px 9999px",
+                                transition: "background 0.08s ease",
+                            }} />
+                        </div>
+                    );
+                })}
+            </div>
+            <input
+                type="range"
+                min={0}
+                max={duration || 100}
+                step={0.01}
+                value={currentTime}
+                onChange={onSeek}
+                style={{
+                    position: "absolute",
+                    inset: 0,
+                    width: "100%",
+                    height: "100%",
+                    opacity: 0,
+                    cursor: "pointer",
+                    margin: 0,
+                }}
+            />
+        </div>
+    );
+}
 
 export default function Dashboard() {
     const [recordings, setRecordings] = useState<any[]>([]);
@@ -46,7 +128,9 @@ export default function Dashboard() {
     const [user, setUser] = useState<any>(null);
     const [deleteModalOpen, setDeleteModalOpen] = useState(false);
     const [recordingToDelete, setRecordingToDelete] = useState<any>(null);
-    const [deleteConfirmId, setDeleteConfirmId] = useState("");
+    const [deleteConfirmText, setDeleteConfirmText] = useState("");
+    const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
+    const [calendarOpen, setCalendarOpen] = useState(false);
     const router = useRouter();
 
     useEffect(() => {
@@ -76,9 +160,11 @@ export default function Dashboard() {
         fetchData();
     }, [router]);
 
+    const getMeetingTitle = (rec: any) => rec?.meeting_url?.split('/').pop() || "Untitled Meeting";
+
     const handleDelete = async () => {
-        if (deleteConfirmId !== recordingToDelete.id.toString()) {
-            toast.error("Meeting ID does not match");
+        if (deleteConfirmText !== getMeetingTitle(recordingToDelete)) {
+            toast.error("Meeting title does not match");
             return;
         }
 
@@ -87,12 +173,20 @@ export default function Dashboard() {
             setRecordings(recordings.filter(r => r.id !== recordingToDelete.id));
             setDeleteModalOpen(false);
             setRecordingToDelete(null);
-            setDeleteConfirmId("");
+            setDeleteConfirmText("");
             toast.success("Recording deleted successfully");
         } catch (err) {
             toast.error("Failed to delete recording");
         }
     };
+
+    const filteredRecordings = useMemo(() => {
+        if (!selectedDate) return recordings;
+        return recordings.filter((r) => {
+            if (!r.created_at) return false;
+            return isSameDay(new Date(r.created_at), selectedDate);
+        });
+    }, [recordings, selectedDate]);
 
     if (!user) {
         return (
@@ -113,22 +207,49 @@ export default function Dashboard() {
                         <h1 className="text-sm font-bold tracking-tight text-muted-foreground uppercase">My Meetings</h1>
                     </div>
 
-                    <div className="ml-auto flex items-center gap-4">
-                        <div className="relative group hidden md:block">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
-                            <input
-                                type="text"
-                                placeholder="Search sessions..."
-                                className="bg-muted/30 border border-border/20 px-10 py-2 rounded-full text-xs outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all w-56 font-medium"
-                            />
-                        </div>
-                    </div>
                 </header>
 
                 <div className="p-6 lg:p-10 max-w-[1400px] mx-auto w-full">
-                    <div className="mb-10">
-                        <h2 className="text-4xl font-black tracking-tighter mb-2 italic">Meeting Intelligence</h2>
-                        <p className="text-muted-foreground font-medium">Automatic summaries and high-fidelity transcripts for every call.</p>
+                    <div className="mb-8 flex items-center justify-between">
+                        <h2 className="text-4xl font-black tracking-tighter italic">Meeting Intelligence</h2>
+                        <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+                            <PopoverTrigger asChild>
+                                <button
+                                    className={cn(
+                                        "inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium border transition-all duration-200 hover:scale-105 active:scale-95",
+                                        selectedDate
+                                            ? "bg-primary text-white border-primary shadow-md shadow-primary/20"
+                                            : "bg-card border-border/50 text-muted-foreground hover:border-primary/30 hover:text-foreground shadow-sm"
+                                    )}
+                                >
+                                    <CalendarIcon className="w-4 h-4" />
+                                    <span>{selectedDate ? format(selectedDate, 'MMM dd, yyyy') : 'Filter by date'}</span>
+                                    {selectedDate && (
+                                        <X
+                                            className="w-3.5 h-3.5 ml-0.5 hover:text-white/80"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setSelectedDate(undefined);
+                                            }}
+                                        />
+                                    )}
+                                </button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0 rounded-2xl border-border/50 shadow-xl" align="start">
+                                <Calendar
+                                    mode="single"
+                                    selected={selectedDate}
+                                    onSelect={(date) => {
+                                        setSelectedDate(date);
+                                        setCalendarOpen(false);
+                                    }}
+                                    className="rounded-2xl"
+                                    classNames={{
+                                        today: "bg-primary/10 text-primary rounded-md",
+                                    }}
+                                />
+                            </PopoverContent>
+                        </Popover>
                     </div>
 
                     {loading ? (
@@ -139,7 +260,7 @@ export default function Dashboard() {
                     ) : recordings.length === 0 ? (
                         <div className="text-center py-24 px-6 rounded-[32px] border border-border/50 bg-muted/5 flex flex-col items-center">
                             <div className="w-16 h-16 rounded-3xl bg-muted/40 flex items-center justify-center mb-6">
-                                <Calendar className="w-8 h-8 text-primary/40" />
+                                <CalendarIcon className="w-8 h-8 text-primary/40" />
                             </div>
                             <h3 className="text-xl font-bold mb-1">No meeting history yet</h3>
                             <p className="text-muted-foreground max-w-sm mx-auto mb-6 text-sm font-medium">
@@ -152,12 +273,16 @@ export default function Dashboard() {
                     ) : (
                         <div className="space-y-6">
                             <div className="flex items-center justify-between px-2 mb-2">
-                                <h3 className="text-[10px] font-black uppercase tracking-[0.4em] text-muted-foreground opacity-40">Recent Sessions</h3>
-                                <div className="text-[10px] font-bold text-muted-foreground/40">{recordings.length} total</div>
+                                <h3 className="text-[10px] font-black uppercase tracking-[0.4em] text-muted-foreground opacity-40">
+                                    {selectedDate ? format(selectedDate, 'EEEE, MMMM d') : 'All Sessions'}
+                                </h3>
+                                <div className="text-[10px] font-bold text-muted-foreground/40">
+                                    {filteredRecordings.length}{selectedDate ? ` of ${recordings.length}` : ' total'}
+                                </div>
                             </div>
 
-                            <div className="grid grid-cols-1 gap-4">
-                                {recordings.map((recording, i) => (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                {filteredRecordings.map((recording, i) => (
                                     <RecordingCard
                                         key={recording.id}
                                         recording={recording}
@@ -168,43 +293,62 @@ export default function Dashboard() {
                                         }}
                                     />
                                 ))}
+                                {filteredRecordings.length === 0 && (
+                                    <div className="col-span-full text-center py-16">
+                                        <div className="w-14 h-14 rounded-2xl bg-muted/30 flex items-center justify-center mx-auto mb-4">
+                                            <CalendarIcon className="w-6 h-6 text-muted-foreground/30" />
+                                        </div>
+                                        <p className="text-sm font-medium text-muted-foreground/50">No recordings found for this period</p>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}
                 </div>
 
-                <Dialog open={deleteModalOpen} onOpenChange={setDeleteModalOpen}>
-                    <DialogContent>
+                <Dialog open={deleteModalOpen} onOpenChange={(open) => {
+                    setDeleteModalOpen(open);
+                    if (!open) setDeleteConfirmText("");
+                }}>
+                    <DialogContent className="sm:max-w-md">
                         <DialogHeader>
-                            <DialogTitle className="text-2xl font-black italic">Delete Recording?</DialogTitle>
-                            <DialogDescription>
-                                This action is permanent. To confirm, please type the meeting ID <span className="text-foreground font-bold underline select-all">{recordingToDelete?.id}</span> below.
+                            <DialogTitle className="text-xl font-bold tracking-tight">Delete this recording?</DialogTitle>
+                            <DialogDescription className="text-sm leading-relaxed pt-1">
+                                This action is permanent and cannot be undone. To confirm, type the meeting title{' '}
+                                <span className="text-foreground font-semibold bg-muted/80 px-1.5 py-0.5 rounded-md select-all text-xs font-mono">{getMeetingTitle(recordingToDelete)}</span>{' '}
+                                below.
                             </DialogDescription>
                         </DialogHeader>
-                        <div className="py-4">
+                        <div className="py-3">
                             <input
                                 type="text"
-                                value={deleteConfirmId}
-                                onChange={(e) => setDeleteConfirmId(e.target.value)}
-                                placeholder="Enter meeting ID"
-                                className="w-full bg-muted/50 border border-border/50 p-4 rounded-2xl outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500/50 transition-all font-bold tracking-tight"
+                                value={deleteConfirmText}
+                                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                                placeholder="Enter meeting title to confirm"
+                                className="w-full bg-muted/30 border border-border/40 p-3.5 rounded-xl outline-none focus:ring-2 focus:ring-rose-500/15 focus:border-rose-400/40 transition-all text-sm font-medium tracking-tight placeholder:text-muted-foreground/40"
                             />
                         </div>
-                        <DialogFooter>
+                        <DialogFooter className="gap-2 sm:gap-2">
                             <button
                                 onClick={() => {
                                     setDeleteModalOpen(false);
-                                    setDeleteConfirmId("");
+                                    setDeleteConfirmText("");
                                 }}
-                                className="px-6 py-2 rounded-xl text-xs font-bold hover:bg-muted transition-colors"
+                                className="px-5 py-2.5 rounded-xl text-sm font-medium hover:bg-muted border border-border/30 transition-colors"
                             >
                                 Cancel
                             </button>
                             <button
                                 onClick={handleDelete}
-                                className="bg-red-500 hover:bg-red-600 text-white px-6 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg shadow-red-500/20 active:scale-95 transition-all"
+                                disabled={deleteConfirmText !== getMeetingTitle(recordingToDelete)}
+                                className={cn(
+                                    "text-white px-5 py-2.5 rounded-xl text-sm font-medium flex items-center gap-2 active:scale-95 transition-all",
+                                    deleteConfirmText === getMeetingTitle(recordingToDelete)
+                                        ? "bg-rose-600 hover:bg-rose-700 shadow-md shadow-rose-600/15"
+                                        : "bg-rose-600/40 cursor-not-allowed opacity-60"
+                                )}
                             >
-                                <Trash2 className="w-4 h-4" /> Delete Permanently
+                                <Trash2 className="w-3.5 h-3.5" /> Delete Permanently
                             </button>
                         </DialogFooter>
                     </DialogContent>
@@ -252,113 +396,120 @@ function RecordingCard({ recording, index, onDelete }: { recording: any; index: 
 
     return (
         <motion.div
-            initial={{ opacity: 0, x: -10 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: index * 0.03 }}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: index * 0.05, type: "spring", stiffness: 100 }}
             className="group"
+            onClick={() => router.push(`/dashboard/recordings/${recording.id}`)}
         >
-            <div className="p-3 rounded-2xl bg-card border border-border/50 flex flex-col gap-2 hover:border-[#e071554d] hover:bg-card/80 transition-all shadow-sm hover:shadow-lg hover:shadow-[#e071550a] cursor-pointer relative overflow-hidden group/card"
-                onClick={() => router.push(`/dashboard/recordings/${recording.id}`)}>
-
-                <audio
-                    ref={audioRef}
-                    src={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001'}/api/recordings/${recording.id}/audio?token=${tokenManager.getToken()}`}
-                    onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime || 0)}
-                    onLoadedMetadata={() => {
-                        if (audioRef.current && isFinite(audioRef.current.duration) && audioRef.current.duration > 0) {
-                            setDuration(audioRef.current.duration);
-                        }
-                    }}
-                    onEnded={() => setIsPlaying(false)}
-                />
-
-                <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#e07155] to-[#f1efd8] flex items-center justify-center shrink-0 shadow-md shadow-[#e0715520]">
-                            <Play className={cn("w-4 h-4 text-white fill-current", isPlaying && "hidden")} />
-                            <div className={cn("flex items-center gap-0.5", !isPlaying && "hidden")}>
-                                {[1, 2, 3].map(i => (
-                                    <motion.div
-                                        key={i}
-                                        animate={{ height: [6, 14, 6] }}
-                                        transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.1 }}
-                                        className="w-0.5 bg-white rounded-full"
-                                    />
-                                ))}
-                            </div>
-                        </div>
-
-                        <div className="min-w-0">
-                            <h3 className="text-sm font-black text-foreground truncate group-hover/card:text-[#e07155] transition-colors">
-                                {recording.meeting_url.split('/').pop() || "Untitled Meeting"}
-                            </h3>
-                            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-                                {recording.created_at ? format(new Date(recording.created_at), 'MMM dd, yyyy') : 'Recent Session'}
-                                {duration > 0 && <span className="ml-2 text-[#e07155]">· {formatTime(duration)}</span>}
-                            </p>
+            <div className="relative bg-card border border-border/50 rounded-[32px] overflow-hidden flex flex-col h-full transition-all duration-300 hover:border-primary/30 hover:shadow-2xl hover:shadow-primary/5 cursor-pointer group/card">
+                {/* Visual Header / Thumbnail */}
+                <div className="h-40 bg-muted/20 relative flex items-center justify-center overflow-hidden border-b border-border/10">
+                    <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent transition-opacity group-hover/card:opacity-100 opacity-60" />
+                    <div className="relative w-16 h-16 rounded-[24px] bg-primary flex items-center justify-center shadow-xl shadow-primary/20 group-hover/card:scale-110 transition-transform duration-500">
+                        <Play className={cn("w-7 h-7 text-white fill-current", isPlaying && "hidden")} />
+                        <div className={cn("flex items-center gap-1", !isPlaying && "hidden")}>
+                            {[1, 2, 3].map(i => (
+                                <motion.div
+                                    key={i}
+                                    animate={{ height: [8, 20, 8] }}
+                                    transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.1 }}
+                                    className="w-1 bg-white rounded-full"
+                                />
+                            ))}
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                        <div className="hidden sm:flex bg-[#e0715510] px-2.5 py-1 rounded-full items-center gap-1.5 border border-[#e0715515]">
-                            <div className="w-1 h-1 rounded-full bg-[#e07155]" />
-                            <span className="text-[9px] font-black text-[#e07155] tracking-widest uppercase">
+                    {/* Status Badge */}
+                    <div className="absolute top-4 right-4">
+                        <div className="bg-background/80 backdrop-blur-md px-3 py-1 rounded-full border border-border/20 flex items-center gap-2">
+                            <div className={cn("w-1.5 h-1.5 rounded-full", recording.status === 'completed' ? "bg-green-500" : "bg-orange-500 animate-pulse")} />
+                            <span className="text-[10px] font-black uppercase tracking-widest text-foreground/80">
                                 {recording.status === 'completed' ? 'Ready' : 'Syncing'}
                             </span>
                         </div>
-                        <button
-                            onClick={togglePlay}
-                            className="w-9 h-9 rounded-full bg-secondary text-secondary-foreground flex items-center justify-center hover:scale-110 active:scale-90 transition-all shadow-md"
-                        >
-                            {isPlaying ? <Pause className="w-3.5 h-3.5 fill-current" /> : <Play className="w-3.5 h-3.5 fill-current ml-0.5" />}
-                        </button>
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
+                    </div>
+                </div>
+
+                <div className="p-6 flex flex-col flex-1">
+                    <div className="flex-1 mb-6">
+                        <h3 className="text-xl font-black text-foreground tracking-tight line-clamp-2 mb-3 group-hover/card:text-primary transition-colors">
+                            {recording.meeting_url?.split('/').pop() || "Untitled Meeting"}
+                        </h3>
+
+                        <div className="flex flex-wrap gap-4">
+                            <div className="flex items-center gap-2 text-muted-foreground">
+                                <CalendarIcon className="w-3.5 h-3.5" />
+                                <span className="text-[11px] font-bold uppercase tracking-wider">
+                                    {recording.created_at ? format(new Date(recording.created_at), 'MMM dd, yyyy') : 'Recent'}
+                                </span>
+                            </div>
+                            <div className="flex items-center gap-2 text-primary">
+                                <Clock className="w-3.5 h-3.5" />
+                                <span className="text-[11px] font-bold uppercase tracking-wider">
+                                    {formatTime(duration)}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Audio Controls */}
+                    <div className="space-y-4" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-black text-muted-foreground/50 w-8">{formatTime(currentTime)}</span>
+                            <div className="flex-1">
+                                <CardWaveformSeekBar
+                                    currentTime={currentTime}
+                                    duration={duration}
+                                    onSeek={handleSeek}
+                                />
+                            </div>
+                            <span className="text-[10px] font-black text-muted-foreground/50 w-8 text-right">{formatTime(duration)}</span>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-2 border-t border-border/10">
+                            <audio
+                                ref={audioRef}
+                                src={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001'}/api/recordings/${recording.id}/audio?token=${tokenManager.getToken()}`}
+                                onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime || 0)}
+                                onLoadedMetadata={() => {
+                                    if (audioRef.current && isFinite(audioRef.current.duration) && audioRef.current.duration > 0) {
+                                        setDuration(audioRef.current.duration);
+                                    }
+                                }}
+                                onEnded={() => setIsPlaying(false)}
+                            />
+
+                            <button
+                                onClick={togglePlay}
+                                className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center hover:bg-primary hover:text-white transition-all"
+                            >
+                                {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
+                            </button>
+
+                            <div className="flex items-center gap-1">
                                 <button
-                                    className="w-8 h-8 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground flex items-center justify-center transition-all"
-                                    onClick={(e) => e.stopPropagation()}
-                                >
-                                    <MoreVertical className="w-4 h-4" />
-                                </button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-44 rounded-xl p-1.5">
-                                <DropdownMenuItem
-                                    className="rounded-lg flex items-center gap-2 p-2.5 font-bold text-xs"
                                     onClick={(e) => {
                                         e.stopPropagation();
                                         router.push(`/dashboard/recordings/${recording.id}`);
                                     }}
+                                    className="p-2.5 rounded-xl hover:bg-muted text-muted-foreground hover:text-foreground transition-all"
+                                    title="View Analysis"
                                 >
-                                    <BarChart3 className="w-3.5 h-3.5" /> View Insights
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                    className="rounded-lg flex items-center gap-2 p-2.5 font-bold text-xs text-red-500 hover:text-red-600 hover:bg-red-50 focus:bg-red-50 focus:text-red-600"
+                                    <BarChart3 className="w-4 h-4" />
+                                </button>
+                                <button
                                     onClick={(e) => {
                                         e.stopPropagation();
                                         onDelete();
                                     }}
+                                    className="p-2.5 rounded-xl hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-all font-bold"
+                                    title="Delete Session"
                                 >
-                                    <Trash2 className="w-3.5 h-3.5" /> Delete Session
-                                </DropdownMenuItem>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
-                    </div>
-                </div>
-
-                <div className="px-0.5" onClick={e => e.stopPropagation()}>
-                    <div className="flex items-center gap-2">
-                        <span className="text-[8px] font-bold text-muted-foreground/60 w-6">{formatTime(currentTime)}</span>
-                        <div className="flex-1 relative group/seek">
-                            <input
-                                type="range"
-                                min="0"
-                                max={duration || 100}
-                                value={currentTime}
-                                onChange={handleSeek}
-                                className="w-full h-0.5 bg-muted rounded-full appearance-none cursor-pointer accent-[#e07155] group-hover/seek:h-1 transition-all"
-                            />
+                                    <Trash2 className="w-4 h-4" />
+                                </button>
+                            </div>
                         </div>
-                        <span className="text-[8px] font-bold text-muted-foreground/60 w-6 text-right">{formatTime(duration)}</span>
                     </div>
                 </div>
             </div>

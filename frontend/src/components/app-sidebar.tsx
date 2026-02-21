@@ -7,7 +7,6 @@ import {
     MoonIcon,
     SettingsIcon,
     SunIcon,
-    UsersIcon,
 } from "lucide-react"
 import { Logo } from "@/components/logo"
 import { NavMain } from "@/components/nav-main"
@@ -30,11 +29,6 @@ const data = {
             title: "All Meetings",
             url: "/dashboard",
             icon: CalendarIcon,
-        },
-        {
-            title: "Shared with me",
-            url: "/dashboard/shared",
-            icon: UsersIcon,
         },
         {
             title: "Settings",
