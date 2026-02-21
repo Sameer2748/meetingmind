@@ -31,9 +31,17 @@ class DeepgramService {
             );
 
             const result = response.data;
+            const words = result.results.channels[0].alternatives[0].words;
             return {
                 text: result.results.channels[0].alternatives[0].transcript,
                 formatted: this.formatTranscript(result),
+                words: words.map(w => ({
+                    word: w.punctuated_word || w.word,
+                    start: w.start,
+                    end: w.end,
+                    speaker: w.speaker,
+                    confidence: w.confidence
+                })),
                 raw: result
             };
 

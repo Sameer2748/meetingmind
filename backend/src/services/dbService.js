@@ -11,9 +11,11 @@ class DatabaseService {
 
     async init() {
         try {
-            console.log('[Database] Connected to PostgreSQL via Drizzle');
+            // Test connection
+            await this.db.execute('SELECT 1');
+            console.log('[Database] Verified connection to PostgreSQL via Drizzle');
         } catch (err) {
-            console.error('[Database] [ERROR] Connection Error:', err.message);
+            console.error('[Database] [ERROR] Connection failed:', err.message);
         }
     }
 
@@ -77,16 +79,20 @@ class DatabaseService {
         }
     }
 
-    async saveTranscriptResult(recordingId, text, transcriptUrl) {
+    async saveTranscriptResult(recordingId, text, transcriptUrl, words = null) {
         try {
+            const updateData = {
+                transcript_text: text,
+                transcript_url: transcriptUrl,
+                status: 'completed'
+            };
+            if (words) {
+                updateData.transcript_words = words;
+            }
             await this.db.update(recordings)
-                .set({
-                    transcript_text: text,
-                    transcript_url: transcriptUrl,
-                    status: 'completed'
-                })
+                .set(updateData)
                 .where(eq(recordings.id, recordingId));
-            console.log(`[Database] Transcript results saved for recording ID: ${recordingId}`);
+            console.log(`[Database] Transcript results saved for recording ID: ${recordingId}${words ? ` (${words.length} words with timestamps)` : ''}`);
         } catch (err) {
             console.error('[Database] [ERROR] Failed to save transcript result:', err.message);
         }

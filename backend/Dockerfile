@@ -1,5 +1,5 @@
 # backend/Dockerfile
-FROM node:18-slim
+FROM node:20-slim
 
 # Install dependencies for Puppeteer (even though bot logic moved, some deps might be shared or needed for potential fallbacks)
 RUN apt-get update && apt-get install -y \
