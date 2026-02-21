@@ -9,6 +9,7 @@
         {
             "run_at": "document_idle",
             "js": [
+                "config.js",
                 "content/content.js"
             ],
             "css": [
@@ -39,6 +40,17 @@
     ],
     "host_permissions": [
         "https://meet.google.com/*",
-        "http://localhost:5001/*"
+        "http://*/*",
+        "https://*/*"
+    ],
+    "web_accessible_resources": [
+        {
+            "resources": [
+                "assets/icon128.png"
+            ],
+            "matches": [
+                "https://meet.google.com/*"
+            ]
+        }
     ]
 }
