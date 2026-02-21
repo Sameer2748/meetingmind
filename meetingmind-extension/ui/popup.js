@@ -4,11 +4,7 @@ console.log('[Popup] loaded')
 const notOnMeet = document.getElementById('not-on-meet')
 const meetIdle = document.getElementById('meet-idle')
 const meetRecording = document.getElementById('meet-recording')
-const btnRecord = document.getElementById('btn-record')
-const btnStop = document.getElementById('btn-stop')
 const meetingTitle = document.getElementById('meeting-title')
-const recordingTitle = document.getElementById('recording-title')
-const timerEl = document.getElementById('timer')
 
 let timerInterval = null
 
@@ -44,11 +40,6 @@ function showLoggedIn(email) {
 
     userEmailEl.textContent = email
     userAvatarEl.textContent = email.charAt(0).toUpperCase()
-
-    if (btnRecord) {
-        btnRecord.disabled = false
-        btnRecord.title = 'Start Cloud Recording'
-    }
 }
 
 function showLoggedOut() {
@@ -58,11 +49,6 @@ function showLoggedOut() {
     loggedInView.classList.add('hidden')
 
     chrome.storage.local.remove(['userEmail', 'authToken'])
-
-    if (btnRecord) {
-        btnRecord.disabled = true;
-        btnRecord.title = 'Please sign in to record';
-    }
 }
 
 // ── Google Login Logic (BACKGROUND FLOW) ──────────
@@ -110,8 +96,6 @@ async function init() {
         notOnMeet.classList.add('hidden')
         meetIdle.classList.add('hidden')
         meetRecording.classList.remove('hidden')
-        recordingTitle.textContent = state.recordingTitle || title
-        startTimer(state.recordingStartTime)
     } else {
         notOnMeet.classList.add('hidden')
         meetIdle.classList.remove('hidden')
@@ -119,50 +103,6 @@ async function init() {
         meetingTitle.textContent = title
     }
 }
-
-// ── Start Recording ────────────────────────────────────
-btnRecord.addEventListener('click', async () => {
-    btnRecord.disabled = true
-    btnRecord.innerHTML = '⏳ Starting...';
-
-    try {
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-        const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id })
-        const title = tab.title?.replace(' - Google Meet', '').trim() || 'Meeting'
-
-        const response = await chrome.runtime.sendMessage({
-            action: 'START_RECORDING',
-            streamId, tabId: tab.id, title
-        })
-
-        if (!response?.ok) throw new Error(response?.error || 'Failed to start');
-
-        meetIdle.classList.add('hidden')
-        meetRecording.classList.remove('hidden')
-        recordingTitle.textContent = title
-        startTimer(Date.now())
-
-    } catch (err) {
-        btnRecord.disabled = false
-        btnRecord.innerHTML = '<span style="width: 12px; height: 12px; background: white; border-radius: 50%;"></span>Start Recording';
-        alert('Recording Error: ' + err.message)
-    }
-})
-
-// ── Stop Recording ─────────────────────────────────────
-btnStop.addEventListener('click', async () => {
-    btnStop.disabled = true
-    btnStop.innerHTML = '⏳ Finishing...';
-
-    try {
-        await chrome.runtime.sendMessage({ action: 'STOP_RECORDING' })
-        if (timerInterval) clearInterval(timerInterval)
-        setTimeout(() => window.close(), 500)
-    } catch (err) {
-        btnStop.disabled = false
-        btnStop.innerHTML = '<span style="width: 12px; height: 12px; background: #ef4444; border-radius: 2px;"></span>Stop Recording';
-    }
-})
 
 // ── Timer ──────────────────────────────────────────────
 function startTimer(startTime) {

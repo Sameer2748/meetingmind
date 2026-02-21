@@ -1,4 +1,5 @@
 // worker/background.js
+importScripts('../config.js');
 console.log('[Background] ========== SERVICE WORKER STARTED ==========')
 
 // Store mic recording data URL (arrives from content script)
@@ -59,25 +60,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
 
-      // Update session state so popup shows recording
-      const startTime = Date.now();
-      chrome.storage.session.set({
-        isRecording: true,
-        recordingStartTime: startTime,
-        recordingTitle: message.meetingTitle || 'Meeting',
-        recordingUrl: message.meetingUrl,
-        recordingType: 'BOT'
-      });
-
-      chrome.action.setBadgeText({ text: 'BOT' })
-      chrome.action.setBadgeBackgroundColor({ color: '#3b82f6' })
-
       // Get user email and token to associate with recording
       chrome.storage.local.get(['userEmail', 'authToken'], (data) => {
         const userEmail = data.userEmail || 'anonymous';
         const authToken = data.authToken || '';
 
-        fetch('http://localhost:5001/api/bot/join', {
+        fetch(`${CONFIG.API_BASE_URL}/api/bot/join`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -88,13 +76,42 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             userEmail: userEmail
           })
         })
-          .then(res => res.json())
-          .then(data => sendResponse({ ok: true, data }))
+          .then(async res => {
+            const data = await res.json();
+            if (!res.ok || data.success === false) {
+              throw new Error(data.error || data.message || `Server error: ${res.status}`);
+            }
+            return data;
+          })
+          .then(data => {
+            // Update session state ONLY after success
+            const startTime = Date.now();
+            chrome.storage.session.set({
+              isRecording: true,
+              recordingStartTime: startTime,
+              recordingTitle: message.meetingTitle || 'Meeting',
+              recordingUrl: message.meetingUrl,
+              recordingType: 'BOT'
+            });
+
+            chrome.action.setBadgeText({ text: 'BOT' })
+            chrome.action.setBadgeBackgroundColor({ color: '#3b82f6' })
+
+            // Notify the tab immediately so UI updates (red dot etc)
+            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+              if (tabs[0]?.id) {
+                chrome.tabs.sendMessage(tabs[0].id, {
+                  action: 'RECORDING_STARTED',
+                  title: message.meetingTitle || 'Meeting',
+                  startTime: startTime
+                }).catch(() => { });
+              }
+            });
+
+            sendResponse({ ok: true, data });
+          })
           .catch(err => {
             console.error('[Background] 🤖 Bot start failed:', err)
-            // Revert state on error
-            chrome.storage.session.set({ isRecording: false, recordingUrl: null });
-            chrome.action.setBadgeText({ text: '' })
             sendResponse({ ok: false, error: err.message })
           })
       })
@@ -109,11 +126,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log('[Background] 🛑 Requesting bot stop for:', message.meetingUrl)
 
     // Clear session state
-    chrome.storage.session.set({ isRecording: false });
+    chrome.storage.session.remove(['isRecording', 'recordingStartTime', 'recordingTitle', 'recordingUrl', 'recordingType']);
     chrome.action.setBadgeText({ text: '' })
 
+    // Notify all tabs immediately
+    chrome.tabs.query({}, (tabs) => {
+      tabs.forEach(tab => {
+        chrome.tabs.sendMessage(tab.id, { action: 'RECORDING_STOPPED' }).catch(() => { });
+      });
+    });
+
     chrome.storage.local.get('authToken', (data) => {
-      fetch('http://localhost:5001/api/bot/stop', {
+      fetch(`${CONFIG.API_BASE_URL}/api/bot/stop`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -132,7 +156,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   } else if (message.action === 'GET_BOT_STATUS') {
     chrome.storage.local.get('authToken', (data) => {
-      fetch(`http://localhost:5001/api/bot/status?meetingUrl=${encodeURIComponent(message.meetingUrl)}`, {
+      fetch(`${CONFIG.API_BASE_URL}/api/bot/status?meetingUrl=${encodeURIComponent(message.meetingUrl)}`, {
         headers: {
           'Authorization': `Bearer ${data.authToken || ''}`
         }
@@ -191,7 +215,7 @@ async function handleGoogleLogin(sendResponse) {
           console.log('[Background] ✅ User identified:', data.email);
 
           // Sync with backend
-          const authRes = await fetch('http://localhost:5001/api/auth/login', {
+          const authRes = await fetch(`${CONFIG.API_BASE_URL}/api/auth/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email: data.email })
@@ -259,11 +283,35 @@ async function handleStartRecording(streamId, tabId, title) {
 function handleStopRecording() {
   console.log('[Background] 🛑 Stopping...')
 
-  chrome.runtime.sendMessage({ action: 'STOP_CAPTURE' }).catch(err => {
-    console.error('[Background] ❌ Stop message failed:', err)
-  })
+  chrome.storage.session.get(['recordingType', 'recordingUrl', 'recordingTabId'], (data) => {
+    if (data.recordingType === 'BOT') {
+      console.log('[Background] 🤖 Stopping Bot for:', data.recordingUrl);
 
-  chrome.storage.session.get('recordingTabId', (data) => {
+      chrome.storage.local.get('authToken', (auth) => {
+        fetch(`${CONFIG.API_BASE_URL}/api/bot/stop`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${auth.authToken || ''}`
+          },
+          body: JSON.stringify({ meetingUrl: data.recordingUrl })
+        }).catch(err => console.error('[Background] 🤖 Bot stop failed:', err));
+      });
+
+      if (data.recordingTabId) {
+        chrome.tabs.sendMessage(data.recordingTabId, { action: 'RECORDING_STOPPED' }).catch(() => { });
+      }
+
+      chrome.storage.session.set({ isRecording: false });
+      chrome.action.setBadgeText({ text: '' });
+      return;
+    }
+
+    // Default: Local Capture stop
+    chrome.runtime.sendMessage({ action: 'STOP_CAPTURE' }).catch(err => {
+      console.error('[Background] ❌ Stop message failed:', err)
+    })
+
     if (data.recordingTabId) {
       chrome.tabs.sendMessage(data.recordingTabId, {
         action: 'RECORDING_STOPPED'

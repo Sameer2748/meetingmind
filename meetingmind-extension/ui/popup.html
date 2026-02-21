@@ -27,10 +27,16 @@
             margin-bottom: 24px;
         }
 
-        .header img {
-            width: 32px;
-            height: 32px;
-            filter: drop-shadow(0 0 8px rgba(224, 113, 85, 0.2));
+        .logo-box {
+            width: 38px;
+            height: 38px;
+            background: #e07155;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 12px rgba(224, 113, 85, 0.2);
+            flex-shrink: 0;
         }
 
         .header h1 {
@@ -356,7 +362,8 @@
 
 <body>
     <div class="header">
-        <img src="../assets/icon128.png" alt="logo">
+        <img src="../assets/icon128.png" alt="MeetingMind"
+            style="width: 38px; height: 38px; border-radius: 12px; box-shadow: 0 4px 12px rgba(224, 113, 85, 0.2);">
         <h1>MeetingMind</h1>
     </div>
 
@@ -384,9 +391,7 @@
         <button id="btn-logout" class="btn-logout">Logout</button>
     </div>
 
-    <div class="top-bar">
-        <div class="settings-label">App Settings</div>
-    </div>
+
 
 
 
@@ -407,29 +412,15 @@
             </div>
             <div id="meeting-title" class="meeting-name">Meet - pwi-doyw-bau</div>
         </div>
-        <button id="btn-record" class="btn btn-record">
-            <span style="width: 12px; height: 12px; background: white; border-radius: 50%;"></span>
-            Start Recording
-        </button>
-        <div class="footer-note">Records tab audio + your microphone</div>
+        <div class="footer-note">Use the button in the meeting toolbar to record</div>
     </div>
 
     <!-- Context: Recording -->
     <div id="meet-recording" class="hidden">
-        <div class="status-card" style="border-color: rgba(239, 68, 68, 0.2);">
-            <div class="status-header">CURRENT RECORDING</div>
-            <div class="status-main">
-                <span class="recording-pulse"></span> LIVE
-            </div>
-            <div id="recording-title" class="meeting-name">Meet - pwi-doyw-bau</div>
-        </div>
-        <div id="timer" class="timer">00:00</div>
-        <button id="btn-stop" class="btn btn-stop">
-            <span style="width: 12px; height: 12px; background: #ef4444; border-radius: 2px;"></span>
-            Stop Recording
-        </button>
+        <div class="footer-note">Recording in progress from meeting toolbar...</div>
     </div>
 
+    <script src="../config.js"></script>
     <script src="popup.js"></script>
 </body>
 
