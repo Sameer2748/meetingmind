@@ -1,4 +1,5 @@
 const puppeteer = require('puppeteer-extra');
+require('dotenv').config();
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const fs = require('fs');
 const path = require('path');
@@ -23,7 +24,7 @@ class BotService {
         if (!fs.existsSync(this.sessionsDir)) fs.mkdirSync(this.sessionsDir, { recursive: true });
     }
 
-    async joinMeeting(meetingUrl, botName = 'MeetingMind AI', userEmail = 'anonymous') {
+    async joinMeeting(meetingUrl, botName = 'MeetingMind Notetaker', userEmail = 'anonymous') {
         process.env.PUPPETEER_DISABLE_HEADLESS_WARNING = 'true';
         console.log(`[BotService] Launching Deep-Stealth Bot for: ${meetingUrl} (User: ${userEmail})`);
 
@@ -89,15 +90,29 @@ class BotService {
             let chunksReceived = 0;
 
             await page.exposeFunction('sendAudioChunk', (base64) => {
-                if (!base64) return;
+                const bot = this.activeBots.get(meetingUrl);
+                if (!base64 || !bot) return;
                 const buffer = Buffer.from(base64, 'base64');
                 if (buffer.length > 0) {
                     fileStream.write(buffer);
-                    chunksReceived++;
-                    if (chunksReceived % 5 === 0) {
-                        console.log(`[BotService] [REC] Recording: Received ${chunksReceived} chunks for ${recordingPath.split('/').pop()}`);
+                    bot.chunksReceived++;
+                    if (bot.chunksReceived % 5 === 0) {
+                        console.log(`[BotService] [REC] Recording: Received ${bot.chunksReceived} chunks for ${recordingPath.split('/').pop()}`);
                     }
                 }
+            });
+
+            // Register bot early so it can catch STOP signals while joining
+            this.activeBots.set(meetingUrl, {
+                browser,
+                page,
+                fileStream,
+                recordingPath,
+                userEmail,
+                sessionDir,
+                status: 'joining',
+                stopSignal: false,
+                chunksReceived: 0
             });
 
             console.log(`[BotService] Navigating with Human-Timing...`);
@@ -115,6 +130,14 @@ class BotService {
             let hasClickedJoin = false;
 
             for (let i = 0; i < 30; i++) {
+                // Check for stop signal
+                const currentBot = this.activeBots.get(meetingUrl);
+                if (!currentBot || currentBot.stopSignal) {
+                    console.log(`[BotService] Join loop aborted: ${currentBot ? 'STOP signal received' : 'Bot cleared'}`);
+                    await this.stopMeeting(meetingUrl);
+                    return;
+                }
+
                 const state = await page.evaluate(() => {
                     // 1. Already in meeting?
                     if (document.querySelector('[aria-label="Leave call"], [aria-label="Leave meeting"]')) return 'IN_MEETING';
@@ -135,7 +158,10 @@ class BotService {
                     const btns = Array.from(document.querySelectorAll('button, div[role="button"]'));
                     const hasJoin = btns.some(b => {
                         const lbl = ((b.innerText || '') + (b.getAttribute('aria-label') || '')).toLowerCase();
-                        return lbl.includes('join now') || lbl.includes('ask to join') || lbl.includes('join meeting');
+                        const isJoinBtn = lbl.includes('join now') || lbl.includes('ask to join') || lbl.includes('join meeting');
+                        if (!isJoinBtn) return false;
+                        const rect = b.getBoundingClientRect();
+                        return rect.width > 0 && rect.height > 0 && window.getComputedStyle(b).display !== 'none';
                     });
                     if (hasJoin) return 'READY';
 
@@ -247,18 +273,27 @@ class BotService {
 
                     // STEP 1: Type name (ONLY ONCE per page load)
                     if (!hasTypedName) {
-                        const inputEl = await page.$('input[aria-label*="name"], input[placeholder*="name"], input[type="text"], input');
-                        if (inputEl) {
-                            await inputEl.click({ clickCount: 3 });
+                        const inputEl = await page.evaluateHandle(() => {
+                            const inputs = Array.from(document.querySelectorAll('input[aria-label*="name"], input[placeholder*="name"], input[type="text"]'));
+                            return inputs.find(i => {
+                                const rect = i.getBoundingClientRect();
+                                return rect.width > 0 && rect.height > 0 && window.getComputedStyle(i).display !== 'none';
+                            });
+                        });
+
+                        if (inputEl && inputEl.asElement()) {
+                            const el = inputEl.asElement();
+                            await el.click({ clickCount: 3 });
                             await new Promise(r => setTimeout(r, 200));
-                            await inputEl.press('Backspace');
+                            await el.press('Backspace');
                             await new Promise(r => setTimeout(r, 400));
                             await page.keyboard.type(botName, { delay: 80 + Math.random() * 60 });
                             hasTypedName = true;
                             console.log(`[BotService] Name typed: ${botName}`);
                             await new Promise(r => setTimeout(r, 1500));
                         } else {
-                            console.log(`[BotService] [WARN] No name input found on page.`);
+                            console.log(`[BotService] [WARN] No visible name input found on page.`);
+                            // Fallback: If no input found, maybe we're already "READY" to join or signed in
                         }
                     }
 
@@ -335,19 +370,14 @@ class BotService {
                 await new Promise(r => setTimeout(r, 4000));
             }
 
-            this.activeBots.set(meetingUrl, {
-                browser,
-                page,
-                fileStream,
-                recordingPath,
-                userEmail,
-                sessionDir,
-                status: 'joining'
-            });
+            // Start the actual recording handler if we broke out of loop successfully
             this.handleRecording(page, meetingUrl);
 
         } catch (err) {
             console.error('[BotService] Error:', err.message);
+            // Ensure cleanup on crash during join
+            await this.stopMeeting(meetingUrl);
+            throw err;
         }
     }
 
@@ -386,17 +416,47 @@ class BotService {
                     border: '1px solid #d4d2bb', textAlign: 'center', shadow: '0 30px 60px rgba(1, 17, 79, 0.1)'
                 });
 
-                const emoji = document.createElement('div');
-                emoji.textContent = '🤖';
-                emoji.style.fontSize = '80px';
-                emoji.style.marginBottom = '20px';
-                cardRef.appendChild(emoji);
+                const logoContainer = document.createElement('div');
+                Object.assign(logoContainer.style, {
+                    width: '120px', height: '120px', background: '#e07155', borderRadius: '30px',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '30px',
+                    boxShadow: '0 20px 40px rgba(224, 113, 85, 0.3)'
+                });
+
+                const svgNamespace = "http://www.w3.org/2000/svg";
+                const svg = document.createElementNS(svgNamespace, "svg");
+                svg.setAttribute("width", "60");
+                svg.setAttribute("height", "60");
+                svg.setAttribute("viewBox", "0 0 24 24");
+                svg.setAttribute("fill", "none");
+                svg.setAttribute("stroke", "white");
+                svg.setAttribute("stroke-width", "2");
+                svg.setAttribute("stroke-linecap", "round");
+                svg.setAttribute("stroke-linejoin", "round");
+
+                const paths = [
+                    "M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .52 8.588A4 4 0 0 0 12 18.75a4 4 0 0 0 7.003-3.267 4 4 0 0 0 .52-8.588 4 4 0 0 0-2.527-5.77A3 3 0 1 0 12 5z",
+                    "M12 11h.01",
+                    "M12 13h.01",
+                    "M12 15h.01",
+                    "M12 17h.01",
+                    "M12 9h.01"
+                ];
+
+                paths.forEach(d => {
+                    const path = document.createElementNS(svgNamespace, "path");
+                    path.setAttribute("d", d);
+                    svg.appendChild(path);
+                });
+
+                logoContainer.appendChild(svg);
+                cardRef.appendChild(logoContainer);
 
                 const title = document.createElement('h1');
-                title.textContent = 'MeetingMind AI';
+                title.textContent = 'MeetingMind AI Notetaker';
                 Object.assign(title.style, {
                     fontSize: '36px', fontWeight: '900', margin: '0',
-                    color: '#01114f'
+                    color: '#01114f', letterSpacing: '-0.5px'
                 });
                 cardRef.appendChild(title);
 
@@ -506,12 +566,20 @@ class BotService {
 
     async stopMeeting(meetingUrl) {
         const bot = this.activeBots.get(meetingUrl);
-        if (bot) {
-            const { fileStream, recordingPath, userEmail, browser, sessionDir } = bot;
+        if (!bot) return;
 
-            if (fileStream) {
-                fileStream.end();
-                console.log(`[BotService] Recording finalized: ${recordingPath}`);
+        const { fileStream, recordingPath, userEmail, browser, sessionDir, page } = bot;
+
+        // Immediately update status to 'stopping' to prevent duplicate triggers
+        bot.status = 'stopping';
+        this.updateBotStatus(meetingUrl, 'saving');
+
+        if (fileStream) {
+            fileStream.end();
+
+            // Only save to DB/S3 if we actually got audio!
+            if (bot.chunksReceived > 0) {
+                console.log(`[BotService] Recording finalized: ${recordingPath} (${bot.chunksReceived} chunks)`);
 
                 // Trigger Background Tasks
                 (async () => {
@@ -522,20 +590,11 @@ class BotService {
                             const metadata = await mm.parseFile(recordingPath);
                             duration = Math.round(metadata.format.duration || 0);
 
-                            // Metadata often fails for raw WebM from MediaRecorder
                             if (duration <= 0 && bot.startTime) {
                                 duration = Math.round((Date.now() - bot.startTime) / 1000);
-                                console.log(`[BotService] [INFO] Metadata duration missing. Calculated from start time: ${duration}s`);
-                            } else {
-                                console.log(`[BotService] [INFO] Extracted duration: ${duration}s`);
                             }
                         } catch (e) {
-                            if (bot.startTime) {
-                                duration = Math.round((Date.now() - bot.startTime) / 1000);
-                                console.log(`[BotService] [INFO] Calculated fallback duration: ${duration}s`);
-                            } else {
-                                console.error('[BotService] [ERROR] Duration extraction failed:', e.message);
-                            }
+                            if (bot.startTime) duration = Math.round((Date.now() - bot.startTime) / 1000);
                         }
 
                         // 2. Save to Database (Initial State)
@@ -551,11 +610,7 @@ class BotService {
                         const cloudUrl = await storageService.uploadRecording(recordingPath, userEmail);
 
                         // 4. Update DB with S3 URL
-                        await dbService.saveRecording({
-                            id: recordingId,
-                            s3_url: cloudUrl,
-                            status: 'uploaded'
-                        });
+                        await dbService.saveRecording({ id: recordingId, s3_url: cloudUrl, status: 'uploaded' });
 
                         // 5. Trigger Transcription
                         const transcriptBundle = await transcriptionService.transcribe(cloudUrl, userEmail, recordingPath);
@@ -572,46 +627,71 @@ class BotService {
                                 const transcriptFileName = `transcript-${recordingId}.txt`;
                                 const transcriptS3Url = await storageService.uploadText(result.formatted, transcriptFileName, userEmail);
 
-                                // 8. Update DB with Final Text & URL
-                                await dbService.saveTranscriptResult(recordingId, result.text, transcriptS3Url);
+                                // 8. Update DB with Final Text & URL + Word Timestamps
+                                await dbService.saveTranscriptResult(recordingId, result.formatted, transcriptS3Url, result.words || null);
 
                                 // 9. Optional: Update duration if Deepgram has a more accurate measure
                                 if (result.raw?.metadata?.duration) {
                                     const finalDuration = Math.round(result.raw.metadata.duration);
-                                    await dbService.saveRecording({
-                                        id: recordingId,
-                                        duration: finalDuration
-                                    });
-                                    console.log(`[BotService] [INFO] Updated duration from Deepgram tech: ${finalDuration}s`);
+                                    await dbService.saveRecording({ id: recordingId, duration: finalDuration });
                                 }
                             }
-                        }
-
-                        // ── STORAGE CLEANUP ──
-                        if (fs.existsSync(recordingPath)) {
-                            console.log(`[BotService] [CLEANUP] Local cleanup: (Preserved for internal streaming) ${recordingPath}`);
                         }
                     } catch (err) {
                         console.error('[BotService] Post-processing failed:', err.message);
                     }
                 })();
-            }
-
-            if (browser) await browser.close();
-
-            // Clean up temp Chrome session directory
-            if (sessionDir && fs.existsSync(sessionDir)) {
-                try {
-                    fs.rmSync(sessionDir, { recursive: true, force: true });
-                    console.log(`[BotService] [CLEANUP] Session dir cleaned: ${sessionDir}`);
-                } catch (e) {
-                    console.error(`[BotService] [ERROR] Session cleanup failed:`, e.message);
+            } else {
+                console.log(`[BotService] Skipping S3/DB save: No audio chunks received.`);
+                if (fs.existsSync(recordingPath)) {
+                    try { fs.unlinkSync(recordingPath); } catch (e) { }
                 }
             }
-
-            this.activeBots.delete(meetingUrl);
         }
+
+        // Signal the join loop to stop if it's still running
+        bot.stopSignal = true;
+
+        if (browser) {
+            console.log(`[BotService] Closing browser for ${meetingUrl}`);
+            try {
+                // Try clean exit via UI if possible
+                if (page && !page.isClosed()) {
+                    await page.evaluate(() => {
+                        const leaveBtn = document.querySelector('[aria-label="Leave call"], [aria-label="Leave meeting"]');
+                        if (leaveBtn) leaveBtn.click();
+                    }).catch(() => { });
+                    await new Promise(r => setTimeout(r, 1000));
+                }
+
+                // Force close
+                const browserProcess = browser.process();
+                await browser.close().catch(() => { });
+
+                // Nuclear option: if process still exists, kill it
+                if (browserProcess && browserProcess.pid) {
+                    try { process.kill(browserProcess.pid, 'SIGKILL'); } catch (e) { }
+                }
+            } catch (e) {
+                console.error('[BotService] Browser close error:', e.message);
+            }
+        }
+
+        // Clean up temp Chrome session directory
+        if (sessionDir && fs.existsSync(sessionDir)) {
+            try {
+                // Give OS a moment to release file handles
+                await new Promise(r => setTimeout(r, 500));
+                fs.rmSync(sessionDir, { recursive: true, force: true });
+                console.log(`[BotService] [CLEANUP] Session dir cleaned: ${sessionDir}`);
+            } catch (e) {
+                console.error(`[BotService] [ERROR] Session cleanup failed:`, e.message);
+            }
+        }
+
+        this.activeBots.delete(meetingUrl);
     }
+
     async updateBotStatus(meetingUrl, status) {
         const bot = this.activeBots.get(meetingUrl);
         if (bot) {
