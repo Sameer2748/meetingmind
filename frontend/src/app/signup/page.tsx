@@ -49,7 +49,7 @@ export default function SignUpPage() {
     };
 
     return (
-        <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6 bg-[radial-gradient(circle_at_bottom_left,_var(--primary)_0%,_transparent_40%)]">
+        <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6 bg-[radial-gradient(circle_at_bottom_left,_rgba(224,113,85,0.15)_0%,_transparent_40%)]">
             <Link
                 href="/"
                 className="absolute top-10 left-10 flex items-center gap-2 text-muted-foreground hover:text-primary transition-colors font-medium"
