@@ -25,18 +25,6 @@ MeetingMind is built on a modern, distributed stack designed for reliability and
 
 ---
 
-## 🎥 Product Walkthrough
-
-Watch MeetingMind in action! This video covers the entire flow from extension setup to reviewing transcripts in the dashboard.
-
-> **Note:** Please add your video demonstration link here to give users a live view of the platform.
-
-<div align="center">
-  <video src="YOUR_VIDEO_URL_HERE" width="100%" controls></video>
-</div>
-
----
-
 ## 🚀 Quick Start
 
 ### 1. Prerequisites
@@ -95,7 +83,6 @@ cd frontend && npm run dev
 - `/backend`: Core API and database management.
 - `/bot-worker`: Recording service and Puppeteer engine.
 - `/meetingmind-extension`: Chrome extension for Google Meet integration.
-- `/assets`: Documentation screenshots and branding assets.
 
 ---
 
