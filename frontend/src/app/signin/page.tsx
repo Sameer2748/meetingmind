@@ -197,5 +197,6 @@ export default function SignInPage() {
                     </p>
                 </motion.div>
             </div>
-            );
+        </div>
+    );
 }
