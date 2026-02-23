@@ -1,19 +1,31 @@
-// bot-worker/src/worker.js
-require('dotenv').config();
+const path = require('path');
+// Load environment variables from .env if it exists (for local dev)
+require('dotenv').config({ path: path.join(__dirname, '../../.env') });
+require('dotenv').config(); // Also check local dir
 const { Worker } = require('bullmq');
 const IORedis = require('ioredis');
 const botService = require('./botService');
 
-const connection = new IORedis({
+const redisOptions = process.env.REDIS_URL || {
     host: process.env.REDIS_HOST || 'localhost',
     port: process.env.REDIS_PORT || 6379,
+};
+
+const tlsConfig = (typeof redisOptions === 'string' && redisOptions.startsWith('rediss://')) ? { tls: {} } : {};
+
+const connection = new IORedis(redisOptions, {
     maxRetriesPerRequest: null,
+    enableReadyCheck: false,
+    ...tlsConfig
 });
 
-const subscriber = new IORedis({
-    host: process.env.REDIS_HOST || 'localhost',
-    port: process.env.REDIS_PORT || 6379,
+const subscriber = new IORedis(redisOptions, {
+    ...tlsConfig,
+    enableReadyCheck: false,
+    maxRetriesPerRequest: null
 });
+
+console.log(`[Redis] Worker connecting to: ${typeof redisOptions === 'string' ? 'Cloud (Upstash)' : 'Local'}`);
 
 subscriber.subscribe('bot-commands', (err) => {
     if (err) console.error('[Bot-Worker] Pub/Sub Error:', err.message);

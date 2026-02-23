@@ -10,9 +10,17 @@ const mm = require('music-metadata');
 const IORedis = require('ioredis');
 
 // Setup Redis for Status
-const redis = new IORedis({
+const redisOptions = process.env.REDIS_URL || {
     host: process.env.REDIS_HOST || 'localhost',
     port: process.env.REDIS_PORT || 6379,
+};
+
+const tlsConfig = (typeof redisOptions === 'string' && redisOptions.startsWith('rediss://')) ? { tls: {} } : {};
+
+const redis = new IORedis(redisOptions, {
+    maxRetriesPerRequest: null,
+    enableReadyCheck: false,
+    ...tlsConfig
 });
 
 puppeteer.use(StealthPlugin());

@@ -6,17 +6,20 @@ const { Queue } = require('bullmq');
 const IORedis = require('ioredis');
 
 // Setup Queue & Pub/Sub
-const connection = new IORedis({
+const redisOptions = process.env.REDIS_URL || {
     host: process.env.REDIS_HOST || 'localhost',
     port: process.env.REDIS_PORT || 6379,
+};
+
+const tlsConfig = (typeof redisOptions === 'string' && redisOptions.startsWith('rediss://')) ? { tls: {} } : {};
+
+const connection = new IORedis(redisOptions, {
     maxRetriesPerRequest: null,
+    ...tlsConfig
 });
 
 const meetingQueue = new Queue('meeting-jobs', { connection });
-const publisher = new IORedis({
-    host: process.env.REDIS_HOST || 'localhost',
-    port: process.env.REDIS_PORT || 6379,
-});
+const publisher = new IORedis(redisOptions, tlsConfig);
 
 // Endpoint for the extension to trigger the bot
 router.post('/join', authenticate, async (req, res) => {

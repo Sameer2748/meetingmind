@@ -73,7 +73,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           },
           body: JSON.stringify({
             meetingUrl: message.meetingUrl,
-            userEmail: userEmail
+            userName: message.meetingTitle || 'MeetingMind Notetaker'
           })
         })
           .then(async res => {

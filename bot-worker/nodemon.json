@@ -1,0 +1,14 @@
+{
+    "watch": [
+        "src"
+    ],
+    "ignore": [
+        "bot_sessions/*",
+        "recordings/*",
+        "temp/*",
+        "*.webm",
+        "*.png",
+        "*.json"
+    ],
+    "ext": "js,json"
+}
