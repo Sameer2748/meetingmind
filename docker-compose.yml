@@ -1,24 +1,4 @@
-version: '3.8'
-
 services:
-  postgres:
-    image: postgres:15-alpine
-    container_name: meetingmind-db
-    environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: meetingmind
-    ports:
-      - "5433:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
-  redis:
-    image: redis:7-alpine
-    container_name: meetingmind-redis
-    ports:
-      - "6379:6379"
-
   bot-worker:
     build: ./bot-worker
     container_name: meetingmind-bot-worker
@@ -37,8 +17,3 @@ services:
       - S3_BUCKET_NAME=${S3_BUCKET_NAME}
       - AWS_BUCKET_NAME=${S3_BUCKET_NAME}
       - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
-    depends_on:
-      - postgres
-
-volumes:
-  postgres_data:
