@@ -2,5 +2,5 @@
 self.CONFIG = {
     // Change this to your production API URL when deploying
     // API_BASE_URL: 'https://api.meetingmind.com', 
-    API_BASE_URL: 'http://localhost:5001'
+    API_BASE_URL: 'https://meetingmind-backend.100xsam.live'
 }; 
