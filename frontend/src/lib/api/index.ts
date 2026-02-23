@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { tokenManager } from '../auth/tokenManager';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://meetingmind-backend.100xsam.live';
 
 const apiClient = axios.create({
     baseURL: API_BASE_URL,

@@ -476,7 +476,7 @@ export default function RecordingDetails() {
                             <Share2 className="w-4 h-4" /> Share
                         </button>
                         <a
-                            href={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001'}/api/recordings/${id}/audio?token=${tokenManager.getToken()}`}
+                            href={`${process.env.NEXT_PUBLIC_API_URL || 'https://meetingmind-backend.100xsam.live'}/api/recordings/${id}/audio?token=${tokenManager.getToken()}`}
                             download={`meeting-${id}.webm`}
                             className="bg-primary text-white p-2 sm:px-4 sm:py-2 rounded-xl text-xs font-bold flex items-center gap-2 hover:bg-primary/90 transition-all shadow-lg shadow-primary/20"
                         >
@@ -488,7 +488,7 @@ export default function RecordingDetails() {
                 <div className="max-w-[1400px] mx-auto w-full p-6 lg:p-10">
                     <audio
                         ref={audioRef}
-                        src={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001'}/api/recordings/${id}/audio?token=${tokenManager.getToken()}`}
+                        src={`${process.env.NEXT_PUBLIC_API_URL || 'https://meetingmind-backend.100xsam.live'}/api/recordings/${id}/audio?token=${tokenManager.getToken()}`}
                         onTimeUpdate={handleTimeUpdate}
                         onLoadedMetadata={handleLoadedMetadata}
                         onEnded={() => setIsPlaying(false)}

@@ -470,7 +470,7 @@ function RecordingCard({ recording, index, onDelete }: { recording: any; index: 
                         <div className="flex items-center justify-between pt-2 border-t border-border/10">
                             <audio
                                 ref={audioRef}
-                                src={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001'}/api/recordings/${recording.id}/audio?token=${tokenManager.getToken()}`}
+                                src={`${process.env.NEXT_PUBLIC_API_URL || 'https://meetingmind-backend.100xsam.live'}/api/recordings/${recording.id}/audio?token=${tokenManager.getToken()}`}
                                 onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime || 0)}
                                 onLoadedMetadata={() => {
                                     if (audioRef.current && isFinite(audioRef.current.duration) && audioRef.current.duration > 0) {
