@@ -6,6 +6,7 @@ const { GetObjectCommand } = require("@aws-sdk/client-s3");
 const dbService = require('../services/dbService');
 const storageService = require('../services/storageService');
 const authenticate = require('../middlewares/auth');
+const aiService = require('../services/aiService');
 
 // Get User Recordings
 router.get('/', authenticate, async (req, res) => {
@@ -92,6 +93,34 @@ router.get('/:id/audio', authenticate, async (req, res) => {
     } catch (err) {
         console.error('[Stream Error]', err.message);
         res.status(500).json({ error: 'Failed' });
+    }
+});
+
+// AI Chat about a recording's transcript
+router.post('/:id/chat', authenticate, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { message, history = [] } = req.body;
+        const userEmail = req.user.email;
+
+        if (!message || !message.trim()) {
+            return res.status(400).json({ error: 'Message is required' });
+        }
+
+        const recordings = await dbService.getRecordingsByUser(userEmail);
+        const recording = recordings.find(r => r.id === parseInt(id));
+
+        if (!recording) {
+            return res.status(404).json({ error: 'Recording not found or unauthorized' });
+        }
+
+        const transcript = recording.transcript_text || '';
+        const reply = await aiService.chatWithTranscript(transcript, message.trim(), history);
+
+        res.json({ success: true, response: reply });
+    } catch (err) {
+        console.error('[Chat Error]', err.message);
+        res.status(500).json({ error: err.message || 'Failed to get AI response' });
     }
 });
 
