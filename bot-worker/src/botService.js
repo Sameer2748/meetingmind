@@ -130,6 +130,7 @@ class BotService {
             let blockCount = 0;
             let hasTypedName = false;
             let hasClickedJoin = false;
+            let joinAttempted = false; // tracks if we EVER clicked join this session
 
             for (let i = 0; i < 30; i++) {
                 // Check for stop signal
@@ -141,6 +142,9 @@ class BotService {
                 }
 
                 const state = await page.evaluate(() => {
+                    // 0. Wrong page? (Google redirected to marketing site)
+                    if (!window.location.href.includes('meet.google.com')) return 'WRONG_PAGE';
+
                     // 1. Already in meeting?
                     if (document.querySelector('[aria-label="Leave call"], [aria-label="Leave meeting"]')) return 'IN_MEETING';
 
@@ -149,29 +153,28 @@ class BotService {
                     // 2. Page still loading? Don't misclassify as blocked
                     if (document.title === '' || txt.trim().length < 50) return 'LOADING';
 
-                    // 3. Blocked by Google? Only if BOTH blocker text visible AND no join button/input
+                    // Declare btns early — used by both BLOCKED check and READY check
+                    const btns = Array.from(document.querySelectorAll('button, div[role="button"]'));
+
+                    // 3. Blocked by Google? Only if blocker text visible AND no join button/input visible
+                    const hasJoinBtn = btns.some(b => {
+                        const lbl = ((b.innerText || '') + (b.getAttribute('aria-label') || '')).toLowerCase();
+                        const isJoin = lbl.includes('join now') || lbl.includes('ask to join') || lbl.includes('join meeting');
+                        if (!isJoin) return false;
+                        const rect = b.getBoundingClientRect();
+                        return rect.width > 0 && rect.height > 0 && window.getComputedStyle(b).display !== 'none';
+                    });
                     const trueBlock = (
                         txt.includes("You can't join this video call") ||
                         txt.includes('Invalid video call name')
-                    ) && !document.querySelector('input') && !btns.some(b => {
-                        const lbl = ((b.innerText || '') + (b.getAttribute('aria-label') || '')).toLowerCase();
-                        return lbl.includes('join now') || lbl.includes('ask to join') || lbl.includes('join meeting');
-                    });
+                    ) && !document.querySelector('input') && !hasJoinBtn;
                     if (trueBlock) return 'BLOCKED';
 
                     // 4. Needs Login?
                     if (txt.includes('Sign in') && !document.querySelector('input')) return 'NEEDS_LOGIN';
 
-                    // 5. Check for Join button FIRST — this takes priority over admit text
-                    const btns = Array.from(document.querySelectorAll('button, div[role="button"]'));
-                    const hasJoin = btns.some(b => {
-                        const lbl = ((b.innerText || '') + (b.getAttribute('aria-label') || '')).toLowerCase();
-                        const isJoinBtn = lbl.includes('join now') || lbl.includes('ask to join') || lbl.includes('join meeting');
-                        if (!isJoinBtn) return false;
-                        const rect = b.getBoundingClientRect();
-                        return rect.width > 0 && rect.height > 0 && window.getComputedStyle(b).display !== 'none';
-                    });
-                    if (hasJoin) return 'READY';
+                    // 5. Check for Join button — takes priority over admit text
+                    if (hasJoinBtn) return 'READY';
 
                     // 6. Waiting for host to admit? (ONLY if no join button)
                     if (txt.includes("You'll be let in soon") ||
@@ -210,6 +213,13 @@ class BotService {
                 // Use exponential backoff and reload.
                 // ═══════════════════════════════════════════
                 if (state === 'BLOCKED') {
+                    // If we've already sent a join request, NEVER reload — that kills admission.
+                    // Just wait for the host to admit us.
+                    if (joinAttempted) {
+                        console.log(`[BotService] [WAIT] Post-click block — waiting for host admission (not reloading)...`);
+                        await new Promise(r => setTimeout(r, 3000));
+                        continue;
+                    }
                     blockCount++;
                     const delay = Math.min(1000 * blockCount, 3000);
                     console.log(`[BotService] [RETRY] Block detected (#${blockCount}). Reloading in ${Math.round(delay / 1000)}s...`);
@@ -218,6 +228,8 @@ class BotService {
                     await new Promise(r => setTimeout(r, 500));
                     hasTypedName = false;
                     hasClickedJoin = false;
+                    joinAttempted = false;
+                    blockCount = 0;
                     continue;
                 }
 
@@ -225,6 +237,18 @@ class BotService {
                     await new Promise(r => setTimeout(r, 1000));
                     continue;
                 }
+
+                if (state === 'WRONG_PAGE') {
+                    console.log(`[BotService] [REDIRECT] Redirected away from Meet. Re-navigating to ${meetingUrl}...`);
+                    await page.goto(meetingUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+                    await new Promise(r => setTimeout(r, 500));
+                    hasTypedName = false;
+                    hasClickedJoin = false;
+                    joinAttempted = false;
+                    blockCount = 0;
+                    continue;
+                }
+
 
                 // ═══════════════════════════════════════════
                 // STATE: READY — Lobby is visible with Join button.
@@ -279,7 +303,7 @@ class BotService {
                         }
                     }
 
-                    // STEP 2: Click the Join button (native Puppeteer XPath)
+                    // STEP 2: Click the Join button
                     if (!hasClickedJoin) {
                         let clicked = false;
                         const btnXPaths = [
@@ -301,47 +325,79 @@ class BotService {
                                         await btn.click();
                                         clicked = true;
                                         hasClickedJoin = true;
+                                        joinAttempted = true;
                                         console.log(`[BotService] Clicked join button via XPath: ${xpath}`);
                                         break;
                                     }
                                 }
-                            } catch (e) { /* try next selector */ }
+                            } catch (e) { }
                         }
 
                         if (!clicked) {
                             await page.keyboard.press('Enter');
                             hasClickedJoin = true;
+                            joinAttempted = true;
                             console.log(`[BotService] Fallback: pressed Enter to join.`);
                         }
                     }
 
-                    // STEP 3: Wait and check result — faster check
-                    await new Promise(r => setTimeout(r, 2000));
+                    // STEP 3: After clicking, enter dedicated admission-wait loop.
+                    // Poll every 2s for up to 90s. Never reload — reloading kills the admission request.
+                    console.log(`[BotService] [ADMIT] Waiting for admission (up to 90s)...`);
+                    const admitStart = Date.now();
+                    let admitted = false;
+                    let rejectedBack = false;
 
-                    const postClickState = await page.evaluate(() => {
-                        if (document.querySelector('[aria-label="Leave call"], [aria-label="Leave meeting"]')) return 'IN_MEETING';
-                        const txt = document.body.innerText;
-                        // Very specific checks — avoid matching popup text like "Instead of waiting to be let in"
-                        if (txt.includes("You'll be let in soon") ||
-                            txt.includes('Someone will let you in') ||
-                            txt.includes('Waiting to be let in') ||
-                            txt.includes('want to join this call')) return 'WAITING_ADMIT';
-                        return 'UNKNOWN';
-                    });
+                    while (Date.now() - admitStart < 90000) {
+                        await new Promise(r => setTimeout(r, 2000));
 
-                    if (postClickState === 'IN_MEETING') {
-                        console.log(`[BotService] [SUCCESS] Successfully joined!`);
-                        break;
-                    } else if (postClickState === 'WAITING_ADMIT') {
-                        console.log(`[BotService] [WAIT] Waiting for host to admit...`);
-                        await new Promise(r => setTimeout(r, 3000));
-                        // Keep hasClickedJoin=true — don't re-click while waiting
-                    } else {
-                        console.log(`[BotService] [RETRY] Post-click: still on lobby. Retrying...`);
-                        // Reset ONLY name, keep click flag off so we try clicking again
+                        const admitState = await page.evaluate(() => {
+                            // SUCCESS: Leave button appeared = we're in!
+                            if (document.querySelector('[aria-label="Leave call"], [aria-label="Leave meeting"]')) return 'IN_MEETING';
+
+                            const txt = document.body.innerText;
+
+                            // LOBBY REAPPEARED: request was denied, or we need to re-click
+                            const allBtns = Array.from(document.querySelectorAll('button, div[role="button"]'));
+                            const lobbyBack = allBtns.some(b => {
+                                const lbl = ((b.innerText || '') + (b.getAttribute('aria-label') || '')).toLowerCase();
+                                const isJoin = lbl.includes('join now') || lbl.includes('ask to join') || lbl.includes('join meeting');
+                                if (!isJoin) return false;
+                                const rect = b.getBoundingClientRect();
+                                return rect.width > 0 && rect.height > 0;
+                            });
+                            if (lobbyBack) return 'LOBBY';
+
+                            // All other states = still waiting (WAITING_ADMIT, transitional BLOCKED, etc.)
+                            return 'WAITING';
+                        });
+
+                        if (admitState === 'IN_MEETING') {
+                            console.log(`[BotService] [SUCCESS] Successfully joined!`);
+                            admitted = true;
+                            break;
+                        }
+                        if (admitState === 'LOBBY') {
+                            console.log(`[BotService] [RETRY] Lobby reappeared — re-clicking join...`);
+                            rejectedBack = true;
+                            hasClickedJoin = false; // will re-click on next outer loop iteration
+                            break;
+                        }
+                        // WAITING — log occasionally
+                        const elapsed = Math.round((Date.now() - admitStart) / 1000);
+                        if (elapsed % 10 < 2) console.log(`[BotService] [ADMIT] Still waiting... ${elapsed}s`);
+                    }
+
+                    if (admitted) break; // exit outer loop — we're in!
+                    if (!rejectedBack) {
+                        // 90s timeout — reload and try fresh
+                        console.log(`[BotService] [TIMEOUT] 90s admission wait expired. Reloading...`);
+                        await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
+                        await new Promise(r => setTimeout(r, 500));
                         hasTypedName = false;
                         hasClickedJoin = false;
-                        await new Promise(r => setTimeout(r, 1000));
+                        joinAttempted = false;
+                        blockCount = 0;
                     }
 
                     continue;
