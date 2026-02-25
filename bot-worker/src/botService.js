@@ -352,10 +352,19 @@ class BotService {
                         await new Promise(r => setTimeout(r, 2000));
 
                         const admitState = await page.evaluate(() => {
+                            // WRONG PAGE: Google redirected us away from meet
+                            if (!window.location.href.includes('meet.google.com')) return 'WRONG_PAGE';
+
                             // SUCCESS: Leave button appeared = we're in!
                             if (document.querySelector('[aria-label="Leave call"], [aria-label="Leave meeting"]')) return 'IN_MEETING';
 
                             const txt = document.body.innerText;
+
+                            // DENIED: "You can't join this video call" with countdown to home screen
+                            // This means our join request was rejected by the host (or meeting ended)
+                            if (txt.includes("You can't join this video call") ||
+                                txt.includes('Return to home screen') ||
+                                txt.includes('Returning to home screen')) return 'DENIED';
 
                             // LOBBY REAPPEARED: request was denied, or we need to re-click
                             const allBtns = Array.from(document.querySelectorAll('button, div[role="button"]'));
@@ -368,7 +377,7 @@ class BotService {
                             });
                             if (lobbyBack) return 'LOBBY';
 
-                            // All other states = still waiting (WAITING_ADMIT, transitional BLOCKED, etc.)
+                            // All other states = still waiting
                             return 'WAITING';
                         });
 
@@ -380,7 +389,18 @@ class BotService {
                         if (admitState === 'LOBBY') {
                             console.log(`[BotService] [RETRY] Lobby reappeared — re-clicking join...`);
                             rejectedBack = true;
-                            hasClickedJoin = false; // will re-click on next outer loop iteration
+                            hasClickedJoin = false;
+                            break;
+                        }
+                        if (admitState === 'DENIED' || admitState === 'WRONG_PAGE') {
+                            console.log(`[BotService] [DENIED] Join request denied or redirected. Re-navigating to meeting...`);
+                            await page.goto(meetingUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+                            await new Promise(r => setTimeout(r, 1000));
+                            hasTypedName = false;
+                            hasClickedJoin = false;
+                            joinAttempted = false;
+                            blockCount = 0;
+                            rejectedBack = true; // skip the 90s-timeout reload at end
                             break;
                         }
                         // WAITING — log occasionally
