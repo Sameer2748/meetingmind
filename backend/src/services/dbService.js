@@ -32,6 +32,25 @@ class DatabaseService {
         }
     }
 
+    async setupUser(email, data) {
+        const { name, avatar, googleAccessToken, cookies } = data;
+        try {
+            const result = await this.db.update(users)
+                .set({
+                    name,
+                    avatar,
+                    google_access_token: googleAccessToken,
+                    cookies: cookies
+                })
+                .where(eq(users.email, email))
+                .returning();
+            return result[0];
+        } catch (err) {
+            console.error('[Database] [ERROR] Failed to setup user:', err.message);
+            return null;
+        }
+    }
+
     async saveRecording(data) {
         const { id, meeting_url, user_email, file_path, s3_url, status, duration } = data;
         try {

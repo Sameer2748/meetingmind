@@ -30,6 +30,16 @@ class DatabaseService {
         }
     }
 
+    async getUserByEmail(email) {
+        try {
+            const result = await this.db.select().from(users).where(eq(users.email, email)).limit(1);
+            return result[0] || null;
+        } catch (err) {
+            console.error('[Database] [ERROR] Failed to get user by email:', err.message);
+            return null;
+        }
+    }
+
     async saveRecording(data) {
         const { id, meeting_url, user_email, file_path, s3_url, status, duration } = data;
         try {

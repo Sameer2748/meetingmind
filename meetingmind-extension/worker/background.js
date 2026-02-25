@@ -175,71 +175,75 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 })
 
 // ── Google Auth Flow ─────────────────────────────────────
+// ── Google Auth Flow (Method 1: Identity API + Cookie Capture) ──────────
 async function handleGoogleLogin(sendResponse) {
-  console.log('[Background] 🔑 Starting Google OAuth Flow...');
-  const CLIENT_ID = '99496009159-1l11a7nj8samhopvrjgcfcer75q3ssh0.apps.googleusercontent.com';
-  const REDIRECT_URI = chrome.identity.getRedirectURL();
-  const SCOPE = encodeURIComponent('email profile openid');
-  const AUTH_URL = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${CLIENT_ID}&response_type=token&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${SCOPE}`;
+  console.log('[Background] 🔑 Starting Google OAuth Flow (Identity API)...');
 
-  chrome.identity.launchWebAuthFlow({
-    url: AUTH_URL,
-    interactive: true
-  }, (responseUrl) => {
-    if (chrome.runtime.lastError) {
-      console.error('[Background] Auth Error:', chrome.runtime.lastError.message);
-      sendResponse({ ok: false, error: chrome.runtime.lastError.message });
-      return;
-    }
-
-    if (!responseUrl) {
-      sendResponse({ ok: false, error: 'No response from Google' });
-      return;
-    }
-
-    const tokenMatch = responseUrl.match(/access_token=([^&]+)/);
-    const token = tokenMatch ? tokenMatch[1] : null;
-
-    if (!token) {
-      sendResponse({ ok: false, error: 'Token missing in response' });
-      return;
-    }
-
-    // Fetch user profile
-    fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
-      .then(r => r.json())
-      .then(async data => {
-        if (data.email) {
-          console.log('[Background] ✅ User identified:', data.email);
-
-          // Sync with backend
-          const authRes = await fetch(`${CONFIG.API_BASE_URL}/api/auth/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: data.email })
-          });
-          const authData = await authRes.json();
-
-          if (authData.token) {
-            await chrome.storage.local.set({
-              userEmail: data.email,
-              authToken: authData.token
-            });
-            sendResponse({ ok: true, email: data.email });
-          } else {
-            sendResponse({ ok: false, error: 'Backend auth failed' });
-          }
-        } else {
-          sendResponse({ ok: false, error: 'Email not shared' });
-        }
-      })
-      .catch(err => {
-        console.error('[Background] Profile sync failed:', err);
-        sendResponse({ ok: false, error: err.message });
+  try {
+    // 1. Get OAuth token using Chrome Identity API
+    // This uses the scopes defined in manifest.json
+    const token = await new Promise((resolve, reject) => {
+      chrome.identity.getAuthToken({ interactive: true }, (token) => {
+        if (chrome.runtime.lastError) reject(chrome.runtime.lastError);
+        else resolve(token);
       });
-  });
+    });
+
+    console.log('[Background] ✅ Access Token obtained');
+
+    // 2. Fetch user profile from Google
+    const userRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const userData = await userRes.json();
+
+    if (!userData.email) {
+      throw new Error('Could not retrieve user email');
+    }
+
+    console.log('[Background] ✅ User identified:', userData.email);
+
+    // 3. Capture Google Cookies (for the bot to use)
+    const googleCookies = await chrome.cookies.getAll({ domain: '.google.com' });
+    const meetCookies = await chrome.cookies.getAll({ domain: 'meet.google.com' });
+    const allCookies = [...googleCookies, ...meetCookies];
+
+    // 4. Sync everything to backend
+    console.log('[Background] 🔄 Syncing auth and cookies to backend...');
+    const setupRes = await fetch(`${CONFIG.API_BASE_URL}/api/auth/setup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        accessToken: token,
+        userInfo: userData,
+        cookies: allCookies,
+        timestamp: Date.now()
+      })
+    });
+
+    const setupData = await setupRes.json();
+
+    if (setupData.success) {
+      // 5. Store locally for extension UI
+      await chrome.storage.local.set({
+        userEmail: userData.email,
+        userName: userData.name,
+        userAvatar: userData.picture,
+        authToken: setupData.token, // This is our backend JWT
+        googleAccessToken: token,
+        isLoggedIn: true
+      });
+
+      console.log('[Background] ✅ Auth setup complete');
+      sendResponse({ ok: true, email: userData.email });
+    } else {
+      throw new Error(setupData.error || 'Backend setup failed');
+    }
+
+  } catch (err) {
+    console.error('[Background] ❌ Login failed:', err.message);
+    sendResponse({ ok: false, error: err.message });
+  }
 }
 
 // ── Start Recording ──────────────────────────────────────

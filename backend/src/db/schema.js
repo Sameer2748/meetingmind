@@ -3,6 +3,10 @@ const { pgTable, serial, text, integer, timestamp, jsonb } = require('drizzle-or
 const users = pgTable('users', {
     id: serial('id').primaryKey(),
     email: text('email').unique().notNull(),
+    name: text('name'),
+    avatar: text('avatar'),
+    google_access_token: text('google_access_token'),
+    cookies: jsonb('cookies'),
     created_at: timestamp('created_at').defaultNow(),
 });
 
