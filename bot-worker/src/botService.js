@@ -172,18 +172,34 @@ class BotService {
 
                 await page.waitForTimeout(3000);
                 const state = await page.evaluate(() => {
+                    // Check for redirect to marketing page
+                    if (window.location.href.includes('workspace.google.com/products/meet')) return 'REDIRECTED';
+
                     if (document.querySelector('[aria-label*="Leave call"], [aria-label*="Leave meeting"]')) return 'IN_MEETING';
                     const txt = document.body.innerText.toLowerCase();
                     if (txt.includes("you can't join") || txt.includes('not found')) return 'BLOCKED';
                     if (txt.includes('waiting for') || txt.includes('let you in soon')) return 'WAITING_ADMIT';
+
                     const btns = Array.from(document.querySelectorAll('button, [role="button"]'));
-                    const hasJoin = btns.some(b => (b.innerText || '').toLowerCase().includes('join') || (b.getAttribute('aria-label') || '').toLowerCase().includes('join'));
-                    return hasJoin ? 'READY' : 'LOADING';
+                    const enabledJoin = btns.find(b => {
+                        const text = (b.innerText || '').toLowerCase();
+                        const label = (b.getAttribute('aria-label') || '').toLowerCase();
+                        const looksLikeJoin = text.includes('join') || label.includes('join');
+                        return looksLikeJoin && !b.disabled && b.getAttribute('aria-disabled') !== 'true';
+                    });
+
+                    if (enabledJoin) return 'READY';
+
+                    const hasAnyJoin = btns.some(b => (b.innerText || '').toLowerCase().includes('join') || (b.getAttribute('aria-label') || '').toLowerCase().includes('join'));
+                    return hasAnyJoin ? 'PREPARING' : 'LOADING';
                 });
 
                 console.log(`[Bot ${botId}] State: ${state}`);
                 if (state === 'IN_MEETING') break;
-                if (state === 'BLOCKED') throw new Error('Meeting blocked');
+                if (state === 'BLOCKED' || state === 'REDIRECTED') {
+                    throw new Error(state === 'REDIRECTED' ? 'Redirected to Google Workspace page (Invalid link or account blocked)' : 'Meeting blocked');
+                }
+
                 if (state === 'READY') {
                     await page.evaluate(() => {
                         const btns = Array.from(document.querySelectorAll('button, [role="button"]'));
@@ -192,10 +208,14 @@ class BotService {
                             if ((lbl.includes('camera') || lbl.includes('microphone')) && lbl.includes('turn off')) b.click();
                         });
                     });
-                    await page.waitForTimeout(1000);
-                    const joinBtn = page.locator('button, [role="button"]').filter({ hasText: /Join now|Ask to join|Join meeting/i }).first();
-                    if (await joinBtn.isVisible()) await joinBtn.click();
-                    else await page.keyboard.press('Enter');
+                    await page.waitForTimeout(2000);
+                    try {
+                        const joinBtn = page.locator('button, [role="button"]').filter({ hasText: /Join now|Ask to join|Join meeting/i }).first();
+                        await joinBtn.click({ timeout: 10000 });
+                    } catch (e) {
+                        console.log(`[Bot ${botId}] Join click failed, trying Enter key...`);
+                        await page.keyboard.press('Enter');
+                    }
                 }
             }
 
