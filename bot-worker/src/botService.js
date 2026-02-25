@@ -296,11 +296,12 @@ class BotService {
                             const el = inputEl.asElement();
                             await el.click({ clickCount: 3 });
                             await el.press('Backspace');
-                            // Type instantly — no human-delay needed
-                            await page.keyboard.type(botName, { delay: 20 });
+                            // Type with slight delay per character (looks human)
+                            await page.keyboard.type(botName, { delay: 40 });
                             hasTypedName = true;
                             console.log(`[BotService] Name typed: ${botName}`);
-                            await new Promise(r => setTimeout(r, 300));
+                            // Wait 2s before clicking join — let Meet enable the button + looks human
+                            await new Promise(r => setTimeout(r, 2000));
                         }
                     }
 
