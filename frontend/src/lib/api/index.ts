@@ -31,6 +31,10 @@ export const recordingsAPI = {
         const res = await apiClient.delete(`/api/recordings/${id}`);
         return res.data;
     },
+    chat: async (id: number, message: string, history: any[] = []) => {
+        const res = await apiClient.post(`/api/recordings/${id}/chat`, { message, history });
+        return res.data;
+    },
 };
 
 export default apiClient;
