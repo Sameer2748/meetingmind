@@ -1,7 +1,6 @@
 const path = require('path');
-// Load environment variables from .env if it exists (for local dev)
 require('dotenv').config({ path: path.join(__dirname, '../../.env') });
-require('dotenv').config(); // Also check local dir
+require('dotenv').config();
 const { Worker } = require('bullmq');
 const IORedis = require('ioredis');
 const botService = require('./botService');
@@ -25,11 +24,21 @@ const subscriber = new IORedis(redisOptions, {
     maxRetriesPerRequest: null
 });
 
-console.log(`[Redis] Worker connecting to: ${typeof redisOptions === 'string' ? 'Cloud (Upstash)' : 'Local'}`);
+// Initialize browser pool on startup
+(async () => {
+    console.log('[Bot-Worker] Initializing browser pool...');
+    try {
+        await botService.initBrowserPool();
+        console.log('[Bot-Worker] ✓ Browser pool ready');
+        console.log('[Bot-Worker] Waiting for meeting jobs...');
+    } catch (err) {
+        console.error('[Bot-Worker] Failed to initialize browser pool:', err.message);
+    }
+})();
 
 subscriber.subscribe('bot-commands', (err) => {
     if (err) console.error('[Bot-Worker] Pub/Sub Error:', err.message);
-    else console.log('[Bot-Worker] Subscribed to bot-commands channel');
+    else console.log('[Bot-Worker] Subscribed to bot-commands');
 });
 
 subscriber.on('message', async (channel, message) => {
@@ -37,35 +46,32 @@ subscriber.on('message', async (channel, message) => {
         try {
             const { action, meetingUrl } = JSON.parse(message);
             if (action === 'STOP') {
-                console.log(`[Bot-Worker] Received STOP signal for ${meetingUrl}`);
+                console.log(`[Bot-Worker] Stopping ${meetingUrl}`);
                 await botService.stopMeeting(meetingUrl);
             }
         } catch (e) {
-            console.error('[Bot-Worker] Pub/Sub Message Error:', e.message);
+            console.error('[Bot-Worker] Pub/Sub Error:', e.message);
         }
     }
 });
 
-console.log('[Bot-Worker] Waiting for meeting jobs...');
-
 const worker = new Worker('meeting-jobs', async job => {
     const { meetingUrl, userName, userEmail } = job.data;
-    console.log(`[Bot-Worker] [JOB ${job.id}] Processing join for ${meetingUrl} (User: ${userEmail})`);
+    console.log(`[Bot-Worker] [JOB ${job.id}] Join: ${meetingUrl}`);
 
     try {
-        // Inject status update capability if needed, but botService should handle its own DB updates
         await botService.joinMeeting(meetingUrl, userName, userEmail);
         return { success: true };
     } catch (err) {
-        console.error(`[Bot-Worker] [JOB ${job.id}] Failed:`, err.message);
+        console.error(`[Bot-Worker] [JOB ${job.id}] Failed: ${err.message}`);
         throw err;
     }
-}, { connection });
+}, { connection, concurrency: 2 });
 
 worker.on('completed', job => {
-    console.log(`[Bot-Worker] [JOB ${job.id}] Completed successfully`);
+    console.log(`[Bot-Worker] [JOB ${job.id}] ✓ Completed`);
 });
 
 worker.on('failed', (job, err) => {
-    console.error(`[Bot-Worker] [JOB ${job.id}] Failed with error: ${err.message}`);
+    console.error(`[Bot-Worker] [JOB ${job.id}] ✗ Failed: ${err.message}`);
 });
