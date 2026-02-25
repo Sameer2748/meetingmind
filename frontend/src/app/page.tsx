@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { Brain, Camera, MessageSquare, Zap } from "lucide-react";
+import { Brain, Camera, MessageSquare, Zap, Bot, Cloud } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useEffect } from "react";
 import { tokenManager } from "@/lib/auth/tokenManager";
@@ -43,9 +43,9 @@ export default function Home() {
       </nav>
 
       {/* Hero Section */}
-      <main className="flex-1 flex flex-col items-center justify-center pt-32 px-6 overflow-hidden">
-        <div className="max-w-4xl w-full text-center relative">
-          {/* Animated Background Gradients */}
+      <main className="flex-1 flex flex-col items-center pt-32 px-6 overflow-hidden">
+        <div className="max-w-5xl w-full text-center relative">
+          {/* Animated Background Gradient */}
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-primary/20 blur-[120px] -z-10 rounded-full" />
 
           <motion.div
@@ -79,12 +79,31 @@ export default function Home() {
             </div>
           </motion.div>
 
+          {/* YouTube Demo Video */}
+          <motion.div
+            className="mt-20 w-full"
+            initial={{ opacity: 0, y: 60 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3, duration: 0.9, ease: "easeOut" }}
+          >
+            <p className="text-xs font-bold tracking-widest uppercase text-muted-foreground mb-4">See It In Action</p>
+            <div className="relative w-full rounded-3xl overflow-hidden border border-border shadow-2xl shadow-primary/10" style={{ paddingBottom: '56.25%' }}>
+              <iframe
+                className="absolute inset-0 w-full h-full"
+                src="https://www.youtube.com/embed/Cps805yI3m0"  
+                title="MeetingMind Demo"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+              />
+            </div>
+          </motion.div>
+
           {/* Feature Grid */}
           <motion.div
-            className="grid grid-cols-1 md:grid-cols-3 gap-8 mt-24 text-left"
+            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-24 text-left"
             initial={{ opacity: 0, y: 50 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4, duration: 0.8 }}
+            transition={{ delay: 0.5, duration: 0.8 }}
           >
             <div className="p-8 rounded-3xl bg-card border border-border hover:border-primary/30 transition-all duration-500 group">
               <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center mb-6 border border-primary/20 group-hover:bg-primary transition-all duration-500">
@@ -102,7 +121,7 @@ export default function Home() {
               </div>
               <h3 className="text-xl font-bold mb-3">AI Intelligence</h3>
               <p className="text-muted-foreground leading-relaxed">
-                Uses AssemblyAI Universal models to detect 99+ languages and separate speakers with perfect precision.
+                Uses Deepgram Universal models to detect 99+ languages and separate speakers with perfect precision.
               </p>
             </div>
 
@@ -114,6 +133,45 @@ export default function Home() {
               <p className="text-muted-foreground leading-relaxed">
                 Get more than just text. We generate structured action items and summaries for every session.
               </p>
+            </div>
+
+            <div className="p-8 rounded-3xl bg-card border border-border hover:border-primary/30 transition-all duration-500 group">
+              <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center mb-6 border border-primary/20 group-hover:bg-primary transition-all duration-500">
+                <Bot className="w-6 h-6 text-primary group-hover:text-white" />
+              </div>
+              <h3 className="text-xl font-bold mb-3">AI Chat Assistant</h3>
+              <p className="text-muted-foreground leading-relaxed">
+                Ask anything about your meeting. Our AI reads the full transcript and answers in seconds, with full context.
+              </p>
+            </div>
+
+            <div className="p-8 rounded-3xl bg-card border border-border hover:border-primary/30 transition-all duration-500 group">
+              <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center mb-6 border border-primary/20 group-hover:bg-primary transition-all duration-500">
+                <Cloud className="w-6 h-6 text-primary group-hover:text-white" />
+              </div>
+              <h3 className="text-xl font-bold mb-3">Secure Cloud Storage</h3>
+              <p className="text-muted-foreground leading-relaxed">
+                All recordings and transcripts are encrypted and stored securely on AWS S3, accessible anytime, anywhere.
+              </p>
+            </div>
+
+            {/* CTA card */}
+            <div className="p-8 rounded-3xl bg-primary border border-primary hover:opacity-90 transition-all duration-500 group flex flex-col justify-between">
+              <div>
+                <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center mb-6">
+                  <Zap className="w-6 h-6 text-white fill-white" />
+                </div>
+                <h3 className="text-xl font-bold mb-3 text-white">Ready to Start?</h3>
+                <p className="text-white/80 leading-relaxed">
+                  Join thousands of teams using MeetingMind to capture every insight from every meeting.
+                </p>
+              </div>
+              <Link
+                href="/signup"
+                className="mt-6 inline-block bg-white text-primary px-6 py-3 rounded-full text-sm font-bold hover:scale-105 transition-all text-center"
+              >
+                Get Started Free →
+              </Link>
             </div>
           </motion.div>
         </div>
