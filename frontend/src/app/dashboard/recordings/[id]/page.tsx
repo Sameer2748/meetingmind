@@ -222,12 +222,6 @@ export default function RecordingDetails() {
     const [showSpeedMenu, setShowSpeedMenu] = useState(false);
     const speedOptions = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
     const speedMenuRef = useRef<HTMLDivElement>(null);
-
-    // Transcript Search State
-    const [searchQuery, setSearchQuery] = useState("");
-    const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
-    const matchRefs = useRef<(HTMLSpanElement | null)[]>([]);
-    const searchInputRef = useRef<HTMLInputElement>(null);
     const [syncEnabled, setSyncEnabled] = useState(true);
 
     // AI Chat State
@@ -429,49 +423,28 @@ export default function RecordingDetails() {
         return segmentStartSec; // fallback to segment start
     }, [wordTimestampMap]);
 
-    // Count total matches for search
     const parsedTranscript = useMemo(() => {
         return recording?.transcript_text ? parseTranscript(recording.transcript_text) : [];
     }, [recording?.transcript_text]);
 
-    const totalMatches = useMemo(() => {
-        if (!searchQuery.trim()) return 0;
-        const query = searchQuery.toLowerCase();
-        let count = 0;
-        parsedTranscript.forEach((u) => {
-            const text = u.text.toLowerCase();
-            let idx = text.indexOf(query);
-            while (idx !== -1) {
-                count++;
-                idx = text.indexOf(query, idx + 1);
-            }
-        });
-        return count;
-    }, [searchQuery, parsedTranscript]);
-
-    // Reset match index when query changes
-    useEffect(() => {
-        setCurrentMatchIndex(0);
-        matchRefs.current = [];
-    }, [searchQuery]);
-
-    // Scroll to current match
-    useEffect(() => {
-        if (totalMatches > 0 && matchRefs.current[currentMatchIndex]) {
-            matchRefs.current[currentMatchIndex]?.scrollIntoView({
-                behavior: 'smooth',
-                block: 'center',
+    // Pre-map each utterance's words to their Deepgram timestamps (for Spotify-style coloring)
+    const wordTimes = useMemo(() => {
+        if (!wordTimestampMap || parsedTranscript.length === 0) return null;
+        const result: Array<Array<{ word: string; start: number; end: number }>> = [];
+        let globalIdx = 0;
+        parsedTranscript.forEach((utterance) => {
+            const words = utterance.text.trim().split(/\s+/).filter(w => w.length > 0);
+            const mapped = words.map((word) => {
+                if (globalIdx < wordTimestampMap.length) {
+                    const entry = wordTimestampMap[globalIdx++];
+                    return { word, start: entry.start, end: entry.end };
+                }
+                return { word, start: 0, end: 0 };
             });
-        }
-    }, [currentMatchIndex, totalMatches]);
-
-    const goToNextMatch = () => {
-        if (totalMatches > 0) setCurrentMatchIndex((prev) => (prev + 1) % totalMatches);
-    };
-
-    const goToPrevMatch = () => {
-        if (totalMatches > 0) setCurrentMatchIndex((prev) => (prev - 1 + totalMatches) % totalMatches);
-    };
+            result.push(mapped);
+        });
+        return result;
+    }, [wordTimestampMap, parsedTranscript]);
 
     // AI Chat handler
     const handleSendMessage = async () => {
@@ -775,163 +748,88 @@ export default function RecordingDetails() {
                             <div className="flex items-center justify-between mb-6">
                                 <h3 className="text-2xl font-semibold tracking-tight">Full Transcript</h3>
                                 {recording.transcript_text && (
-                                    <div className="flex items-center gap-2">
-                                        {/* Sync Toggle */}
-                                        <button
-                                            onClick={() => setSyncEnabled(v => !v)}
-                                            title={syncEnabled ? "Disable transcript sync" : "Enable transcript sync"}
-                                            className={cn(
-                                                "flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border",
-                                                syncEnabled
-                                                    ? "bg-primary text-white border-primary shadow-sm shadow-primary/20"
-                                                    : "bg-muted text-muted-foreground border-border/40 hover:border-primary/30"
-                                            )}
-                                        >
-                                            <Zap className={cn("w-3.5 h-3.5", syncEnabled && "fill-white")} />
-                                            Sync
-                                        </button>
-                                        <div className="relative flex items-center">
-                                            <input
-                                                ref={searchInputRef}
-                                                type="text"
-                                                value={searchQuery}
-                                                onChange={(e) => setSearchQuery(e.target.value)}
-                                                placeholder="Search transcript..."
-                                                className="bg-card border border-border/40 px-5 pr-8 py-2 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/15 focus:border-primary/40 transition-all w-52 font-medium placeholder:text-muted-foreground/40"
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter') goToNextMatch();
-                                                    if (e.key === 'Escape') { setSearchQuery(''); searchInputRef.current?.blur(); }
-                                                }}
-                                            />
-                                            {searchQuery && (
-                                                <button
-                                                    onClick={() => setSearchQuery('')}
-                                                    className="absolute right-2.5 p-0.5 rounded-full hover:bg-muted transition-colors"
-                                                >
-                                                    <X className="w-3.5 h-3.5 text-muted-foreground/60" />
-                                                </button>
-                                            )}
-                                        </div>
-                                        {searchQuery && (
-                                            <div className="flex items-center gap-1">
-                                                <span className="text-xs font-medium text-muted-foreground tabular-nums min-w-[3.5rem] text-center">
-                                                    {totalMatches > 0 ? `${currentMatchIndex + 1}/${totalMatches}` : '0/0'}
-                                                </span>
-                                                <button onClick={goToPrevMatch} disabled={totalMatches === 0} className="p-1 rounded-lg hover:bg-muted disabled:opacity-30 transition-colors">
-                                                    <ChevronUp className="w-4 h-4" />
-                                                </button>
-                                                <button onClick={goToNextMatch} disabled={totalMatches === 0} className="p-1 rounded-lg hover:bg-muted disabled:opacity-30 transition-colors">
-                                                    <ChevronDown className="w-4 h-4" />
-                                                </button>
-                                            </div>
+                                    <button
+                                        onClick={() => setSyncEnabled(v => !v)}
+                                        title={syncEnabled ? "Disable transcript sync" : "Enable transcript sync"}
+                                        className={cn(
+                                            "flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border",
+                                            syncEnabled
+                                                ? "bg-primary text-white border-primary shadow-sm shadow-primary/20"
+                                                : "bg-muted text-muted-foreground border-border/40 hover:border-primary/30"
                                         )}
-                                    </div>
+                                    >
+                                        <Zap className={cn("w-3.5 h-3.5", syncEnabled && "fill-white")} />
+                                        Sync
+                                    </button>
                                 )}
                             </div>
                             <div className="bg-card border border-border/40 rounded-[32px] p-6 lg:p-12 leading-relaxed text-lg font-medium shadow-lg hover:shadow-2xl hover:shadow-primary/5 hover:border-primary/30 transition-all duration-300">
                                 {recording.transcript_text ? (
                                     <div className="space-y-10">
-                                        {(() => {
-                                            let globalMatchCounter = 0;
-                                            // Find active segment index for sync highlighting
-                                            const activeSegIdx = syncEnabled
-                                                ? parsedTranscript.reduce((best, u, idx) =>
-                                                    timeToSeconds(u.time) <= currentTime ? idx : best, -1)
-                                                : -1;
-                                            return parsedTranscript.map((utterance, i) => {
-                                                const isActive = i === activeSegIdx;
-                                                return (
-                                                    <div key={i} className={cn(
-                                                        "group/para rounded-2xl p-3 -mx-3 transition-all duration-300",
-                                                        isActive && "bg-primary/5 border-l-4 border-primary pl-4"
-                                                    )}>
-                                                        <div className="flex items-center gap-3 mb-3">
-                                                            {(() => {
-                                                                const colors = [
-                                                                    'bg-primary/15 text-primary',
-                                                                    'bg-blue-500/15 text-blue-600',
-                                                                    'bg-emerald-500/15 text-emerald-600',
-                                                                    'bg-violet-500/15 text-violet-600',
-                                                                    'bg-amber-500/15 text-amber-600',
-                                                                ];
-                                                                // Fallback logic to pick a color based on speaker ID (e.g. "0", "1", or "A")
-                                                                const speakerIdx = isNaN(parseInt(utterance.speaker))
-                                                                    ? utterance.speaker.charCodeAt(0) % colors.length
-                                                                    : parseInt(utterance.speaker) % colors.length;
-                                                                const colorClass = colors[speakerIdx];
+                                        {parsedTranscript.map((utterance, i) => {
+                                            const colors = [
+                                                'bg-primary/15 text-primary',
+                                                'bg-blue-500/15 text-blue-600',
+                                                'bg-emerald-500/15 text-emerald-600',
+                                                'bg-violet-500/15 text-violet-600',
+                                                'bg-amber-500/15 text-amber-600',
+                                            ];
+                                            // Fallback logic to pick a color based on speaker ID (e.g. "0", "1", or "A")
+                                            const speakerIdx = isNaN(parseInt(utterance.speaker))
+                                                ? utterance.speaker.charCodeAt(0) % colors.length
+                                                : parseInt(utterance.speaker) % colors.length;
+                                            const utteranceWords = wordTimes?.[i];
 
-                                                                return (
-                                                                    <div className={`w-8 h-8 rounded-lg ${colorClass} flex items-center justify-center text-[10px] font-bold uppercase`}>
-                                                                        S{utterance.speaker}
-                                                                    </div>
-                                                                );
-                                                            })()}
-                                                            <button
-                                                                onClick={() => seekToTime(utterance.time)}
-                                                                className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground opacity-50 group-hover/para:opacity-100 transition-opacity hover:text-primary cursor-pointer"
-                                                            >
-                                                                Speaker {utterance.speaker} &bull; {utterance.time}
-                                                            </button>
+                                            return (
+                                                <div key={i} className="group/para">
+                                                    <div className="flex items-center gap-3 mb-3">
+                                                        <div className={`w-8 h-8 rounded-lg ${colors[speakerIdx]} flex items-center justify-center text-[10px] font-bold uppercase`}>
+                                                            S{utterance.speaker}
                                                         </div>
-                                                        <p className="opacity-80 group-hover/para:opacity-100 transition-opacity leading-relaxed font-normal">
-                                                            {(() => {
-                                                                const text = utterance.text;
-
-                                                                // Search highlighting mode
-                                                                if (searchQuery.trim()) {
-                                                                    const query = searchQuery.toLowerCase();
-                                                                    const parts: React.ReactNode[] = [];
-                                                                    let lastIndex = 0;
-                                                                    const lowerText = text.toLowerCase();
-                                                                    let idx = lowerText.indexOf(query);
-                                                                    while (idx !== -1) {
-                                                                        if (idx > lastIndex) parts.push(text.substring(lastIndex, idx));
-                                                                        const matchIdx = globalMatchCounter;
-                                                                        const isCurrentMatch = matchIdx === currentMatchIndex;
-                                                                        const charOffset = idx;
-                                                                        parts.push(
-                                                                            <span
-                                                                                key={`m-${i}-${idx}`}
-                                                                                ref={(el) => { matchRefs.current[matchIdx] = el; }}
-                                                                                onClick={() => seekToSeconds(findWordTimestamp(text, charOffset, utterance.time))}
-                                                                                className={cn(
-                                                                                    "px-0.5 rounded cursor-pointer transition-all",
-                                                                                    isCurrentMatch
-                                                                                        ? "bg-primary text-white font-semibold shadow-sm shadow-primary/30"
-                                                                                        : "bg-primary/20 text-foreground hover:bg-primary/30"
-                                                                                )}
-                                                                            >
-                                                                                {text.substring(idx, idx + searchQuery.length)}
-                                                                            </span>
-                                                                        );
-                                                                        globalMatchCounter++;
-                                                                        lastIndex = idx + searchQuery.length;
-                                                                        idx = lowerText.indexOf(query, lastIndex);
-                                                                    }
-                                                                    if (lastIndex < text.length) parts.push(text.substring(lastIndex));
-                                                                    return parts;
-                                                                }
-
-                                                                // Sync mode — each word is clickable
-                                                                if (syncEnabled) {
-                                                                    return text.split(/\s+/).map((word, wi) => (
-                                                                        <span
-                                                                            key={wi}
-                                                                            onClick={() => seekToSeconds(findWordTimestamp(text, text.split(/\s+/).slice(0, wi).join(' ').length + (wi > 0 ? 1 : 0), utterance.time))}
-                                                                            className="cursor-pointer hover:text-primary hover:bg-primary/10 rounded px-0.5 transition-colors"
-                                                                        >
-                                                                            {word}{' '}
-                                                                        </span>
-                                                                    ));
-                                                                }
-
-                                                                return text;
-                                                            })()}
-                                                        </p>
+                                                        <button
+                                                            onClick={() => seekToTime(utterance.time)}
+                                                            className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground opacity-50 group-hover/para:opacity-100 transition-opacity hover:text-primary cursor-pointer"
+                                                        >
+                                                            Speaker {utterance.speaker} &bull; {utterance.time}
+                                                        </button>
                                                     </div>
-                                                );
-                                            });
-                                        })()}
+                                                    <p className="leading-relaxed font-normal">
+                                                        {/* Spotify-style word coloring when sync enabled + word timestamps available */}
+                                                        {syncEnabled && utteranceWords ? (
+                                                            utteranceWords.map((w, wi) => {
+                                                                const isPlayed = currentTime >= w.end && w.end > 0;
+                                                                const isCurrent = currentTime >= w.start && currentTime < w.end && w.end > 0;
+                                                                const progress = isCurrent
+                                                                    ? Math.min(1, (currentTime - w.start) / Math.max(0.01, w.end - w.start))
+                                                                    : isPlayed ? 1 : 0;
+                                                                const splitAt = Math.round(progress * w.word.length);
+                                                                return (
+                                                                    <span
+                                                                        key={wi}
+                                                                        onClick={() => seekToSeconds(w.start)}
+                                                                        className="cursor-pointer"
+                                                                        title={w.word}
+                                                                    >
+                                                                        {splitAt > 0 && (
+                                                                            <span style={{ color: '#f97316', fontWeight: isCurrent ? 600 : 'inherit' }}>
+                                                                                {w.word.substring(0, splitAt)}
+                                                                            </span>
+                                                                        )}
+                                                                        <span style={{ opacity: isPlayed ? 0.5 : 0.85 }}>
+                                                                            {w.word.substring(splitAt)}
+                                                                        </span>
+                                                                        {' '}
+                                                                    </span>
+                                                                );
+                                                            })
+                                                        ) : (
+                                                            // Sync OFF or no word-timestamps: plain text, click segment header to seek
+                                                            <span className="opacity-80">{utterance.text}</span>
+                                                        )}
+                                                    </p>
+                                                </div>
+                                            );
+                                        })}
                                     </div>
                                 ) : (
                                     <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
