@@ -46,14 +46,17 @@ class BotService {
         process.env.PUPPETEER_DISABLE_HEADLESS_WARNING = 'true';
         console.log(`[BotService] Launching bot for: ${meetingUrl} | Name: "${botName}" | User: ${userEmail}`);
 
-        // Fresh session dir every time — prevents Google profile fingerprinting
         const chromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
         const userDataDir = path.join(process.cwd(), 'bot_chrome_data');
-        if (!fs.existsSync(userDataDir)) fs.mkdirSync(userDataDir, { recursive: true });
+        if (!fs.existsSync(userDataDir)) fs.mkdirSync(userDataDir, { recursive: true, force: true });
+        const isPersistent = true;
 
+        const randomUA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+        let browser;
         try {
-            const browser = await puppeteer.launch({
-                executablePath: fs.existsSync(chromePath) ? chromePath : (process.env.PUPPETEER_EXECUTABLE_PATH || null),
+            browser = await puppeteer.launch({
+                executablePath: fs.existsSync(chromePath) ? chromePath : undefined,
                 headless: false,
                 userDataDir: userDataDir,
                 ignoreDefaultArgs: ['--enable-automation'],
@@ -70,11 +73,10 @@ class BotService {
                     '--disable-default-apps',
                     '--no-first-run',
                     '--no-default-browser-check',
-                    '--password-store=basic',
-                    '--use-mock-keychain',
                     '--lang=en-US,en',
-                    // NOTE: do NOT add --disable-web-security or --disable-features=IsolateOrigins
-                    // They cause a completely black screen on Google Meet
+                    '--remote-debugging-port=0',
+                    '--disable-gpu',
+                    '--disable-software-rasterizer',
                 ]
             });
 
@@ -93,21 +95,7 @@ class BotService {
                 console.error(`[Bot-PageError] ${err.message}`);
             });
 
-            await page.setUserAgent(
-                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-            );
-
-            // ── LOAD COOKIES IF PRESENT ──────────────────────────────────────
-            const cookiePath = path.join(process.cwd(), 'google_cookies.json');
-            if (fs.existsSync(cookiePath)) {
-                try {
-                    const cookies = JSON.parse(fs.readFileSync(cookiePath, 'utf8'));
-                    await page.setCookie(...cookies);
-                    console.log(`[BotService] [AUTH] Loaded cookies from ${cookiePath}`);
-                } catch (e) {
-                    console.error(`[BotService] [WARN] Failed to load cookies:`, e.message);
-                }
-            }
+            await page.setUserAgent(randomUA);
 
             // Deep stealth masking
             await page.evaluateOnNewDocument(() => {
@@ -173,15 +161,13 @@ class BotService {
                 startTime: null,
             });
 
-            console.log(`[BotService] Navigating to meeting...`);
-            // networkidle2 ensures Meet's JS fully loads — domcontentloaded is too early
-            // and causes the black screen you see in the browser
+            console.log(`[BotService] Navigating to meeting (Ghost Mode)...`);
             await page.goto(meetingUrl, { waitUntil: 'networkidle2', timeout: 60000 });
 
-            // Wait for Meet to finish rendering after network settles
-            await new Promise(r => setTimeout(r, 2500));
-            await page.mouse.move(400 + Math.random() * 200, 300 + Math.random() * 200);
-            await new Promise(r => setTimeout(r, 500));
+            // Random jitter and mouse move — looks extremely human to initial scripts
+            await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
+            await page.mouse.move(100 + Math.random() * 800, 100 + Math.random() * 500);
+            await new Promise(r => setTimeout(r, 1000));
 
             let blockCount = 0;
             let hasTypedName = false;
@@ -911,28 +897,36 @@ class BotService {
         }
 
         this.activeBots.delete(meetingUrl);
+    } catch(err) {
+        console.error(`[BotService] [ERROR] joinMeeting crashed: ${err.message}`);
+        if (err.message.includes('existing browser session')) {
+            console.error(`👉 Please CLOSE any existing Chrome windows opened by 'setup-login.js' before starting.`);
+        }
+        if (browser) await browser.close().catch(() => { });
+        this.activeBots.delete(meetingUrl);
     }
+}
 
     // ─────────────────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────────────────
     async updateBotStatus(meetingUrl, status) {
-        const bot = this.activeBots.get(meetingUrl);
-        if (bot) {
-            bot.status = status;
-            console.log(`[BotService] [STATUS] ${meetingUrl} → ${status}`);
-            try {
-                await redis.set(`bot-status:${meetingUrl}`, status, 'EX', 3600);
-            } catch (e) {
-                console.error('[BotService] Redis status update failed:', e.message);
-            }
+    const bot = this.activeBots.get(meetingUrl);
+    if (bot) {
+        bot.status = status;
+        console.log(`[BotService] [STATUS] ${meetingUrl} → ${status}`);
+        try {
+            await redis.set(`bot-status:${meetingUrl}`, status, 'EX', 3600);
+        } catch (e) {
+            console.error('[BotService] Redis status update failed:', e.message);
         }
     }
+}
 
-    getBotStatus(meetingUrl) {
-        const bot = this.activeBots.get(meetingUrl);
-        return bot ? bot.status : 'not_found';
-    }
+getBotStatus(meetingUrl) {
+    const bot = this.activeBots.get(meetingUrl);
+    return bot ? bot.status : 'not_found';
+}
 }
 
 module.exports = new BotService();
