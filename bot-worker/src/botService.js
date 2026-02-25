@@ -123,14 +123,8 @@ class BotService {
                 chunksReceived: 0
             });
 
-            console.log(`[BotService] Navigating with Human-Timing...`);
-            await page.goto(meetingUrl, { waitUntil: 'networkidle2', timeout: 60000 });
-
-            // Simulate human arriving on page
-            await new Promise(r => setTimeout(r, 1500));
-            await page.mouse.move(640, 360);
-            await new Promise(r => setTimeout(r, 300));
-            await page.mouse.move(640 + Math.random() * 100, 360 + Math.random() * 100);
+            console.log(`[BotService] Navigating to meeting...`);
+            await page.goto(meetingUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
             await new Promise(r => setTimeout(r, 500));
 
             let blockCount = 0;
@@ -155,9 +149,15 @@ class BotService {
                     // 2. Page still loading? Don't misclassify as blocked
                     if (document.title === '' || txt.trim().length < 50) return 'LOADING';
 
-                    // 3. Blocked by Google? (Only very specific text)
-                    if (txt.includes("You can't join this video call") ||
-                        txt.includes('Invalid video call name')) return 'BLOCKED';
+                    // 3. Blocked by Google? Only if BOTH blocker text visible AND no join button/input
+                    const trueBlock = (
+                        txt.includes("You can't join this video call") ||
+                        txt.includes('Invalid video call name')
+                    ) && !document.querySelector('input') && !btns.some(b => {
+                        const lbl = ((b.innerText || '') + (b.getAttribute('aria-label') || '')).toLowerCase();
+                        return lbl.includes('join now') || lbl.includes('ask to join') || lbl.includes('join meeting');
+                    });
+                    if (trueBlock) return 'BLOCKED';
 
                     // 4. Needs Login?
                     if (txt.includes('Sign in') && !document.querySelector('input')) return 'NEEDS_LOGIN';
@@ -211,20 +211,18 @@ class BotService {
                 // ═══════════════════════════════════════════
                 if (state === 'BLOCKED') {
                     blockCount++;
-                    const delay = Math.min(4000 * blockCount, 20000);
-                    console.log(`[BotService] [RETRY] Block detected (#${blockCount}). Navigating away first, then retrying in ${Math.round(delay / 1000)}s...`);
-                    await page.goto('https://www.google.com', { waitUntil: 'networkidle2' });
+                    const delay = Math.min(1000 * blockCount, 3000);
+                    console.log(`[BotService] [RETRY] Block detected (#${blockCount}). Reloading in ${Math.round(delay / 1000)}s...`);
                     await new Promise(r => setTimeout(r, delay));
-                    await page.goto(meetingUrl, { waitUntil: 'networkidle2', timeout: 60000 });
-                    // Reset flags — fresh page needs re-entry
+                    await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
+                    await new Promise(r => setTimeout(r, 500));
                     hasTypedName = false;
                     hasClickedJoin = false;
                     continue;
                 }
 
                 if (state === 'LOADING') {
-                    console.log(`[BotService] [WAIT] Page still loading... (${i + 1}/30)`);
-                    await new Promise(r => setTimeout(r, 3000));
+                    await new Promise(r => setTimeout(r, 1000));
                     continue;
                 }
 
@@ -236,50 +234,30 @@ class BotService {
                     console.log(`[BotService] Lobby Ready.`);
                     blockCount = 0;
 
-                    // STEP 0: Dismiss "Got it" popup if present (Google sign-in suggestion)
+                    // STEP 0: Dismiss "Got it" popup if present
                     try {
                         const gotItBtn = await page.$x('//button[contains(., "Got it")]');
                         if (gotItBtn.length > 0) {
                             await gotItBtn[0].click();
-                            console.log(`[BotService] Dismissed "Got it" popup.`);
-                            await new Promise(r => setTimeout(r, 1000));
+                            await new Promise(r => setTimeout(r, 300));
                         }
-                    } catch (e) { /* no popup, continue */ }
+                    } catch (e) { }
 
-                    // STEP 0.5: Turn off camera AND microphone on lobby
+                    // STEP 0.5: Turn off camera AND microphone
                     try {
-                        // Turn off camera
-                        const camOff = await page.evaluate(() => {
+                        await page.evaluate(() => {
                             const btns = Array.from(document.querySelectorAll('[aria-label*="camera" i], [aria-label*="video" i], [data-tooltip*="camera" i]'));
                             const camBtn = btns.find(b => b.tagName === 'BUTTON' || b.getAttribute('role') === 'button');
-                            if (camBtn && !camBtn.getAttribute('aria-label')?.toLowerCase().includes('turn on')) {
-                                camBtn.click();
-                                return true;
-                            }
-                            return false;
+                            if (camBtn && !camBtn.getAttribute('aria-label')?.toLowerCase().includes('turn on')) camBtn.click();
+
+                            const micBtns = Array.from(document.querySelectorAll('[aria-label*="microphone" i], [aria-label*="mic" i], [data-tooltip*="microphone" i]'));
+                            const micBtn = micBtns.find(b => b.tagName === 'BUTTON' || b.getAttribute('role') === 'button');
+                            if (micBtn && !micBtn.getAttribute('aria-label')?.toLowerCase().includes('turn on')) micBtn.click();
                         });
-                        if (camOff) console.log(`[BotService] Camera turned OFF.`);
+                        console.log(`[BotService] Camera + Mic turned OFF.`);
+                    } catch (e) { }
 
-                        // Turn off microphone
-                        const micOff = await page.evaluate(() => {
-                            const btns = Array.from(document.querySelectorAll('[aria-label*="microphone" i], [aria-label*="mic" i], [data-tooltip*="microphone" i]'));
-                            const micBtn = btns.find(b => b.tagName === 'BUTTON' || b.getAttribute('role') === 'button');
-                            if (micBtn && !micBtn.getAttribute('aria-label')?.toLowerCase().includes('turn on')) {
-                                micBtn.click();
-                                return true;
-                            }
-                            return false;
-                        });
-                        if (micOff) console.log(`[BotService] Microphone turned OFF.`);
-
-                        await new Promise(r => setTimeout(r, 500));
-                    } catch (e) { /* toggle not found, continue */ }
-
-                    // Move mouse randomly for stealth
-                    await page.mouse.move(100 + Math.random() * 500, 100 + Math.random() * 300);
-                    await new Promise(r => setTimeout(r, 500));
-
-                    // STEP 1: Type name (ONLY ONCE per page load)
+                    // STEP 1: Type name instantly (ONLY ONCE per page load)
                     if (!hasTypedName) {
                         const inputEl = await page.evaluateHandle(() => {
                             const inputs = Array.from(document.querySelectorAll('input[aria-label*="name"], input[placeholder*="name"], input[type="text"]'));
@@ -292,16 +270,12 @@ class BotService {
                         if (inputEl && inputEl.asElement()) {
                             const el = inputEl.asElement();
                             await el.click({ clickCount: 3 });
-                            await new Promise(r => setTimeout(r, 200));
                             await el.press('Backspace');
-                            await new Promise(r => setTimeout(r, 400));
-                            await page.keyboard.type(botName, { delay: 80 + Math.random() * 60 });
+                            // Type instantly — no human-delay needed
+                            await page.keyboard.type(botName, { delay: 20 });
                             hasTypedName = true;
                             console.log(`[BotService] Name typed: ${botName}`);
-                            await new Promise(r => setTimeout(r, 1500));
-                        } else {
-                            console.log(`[BotService] [WARN] No visible name input found on page.`);
-                            // Fallback: If no input found, maybe we're already "READY" to join or signed in
+                            await new Promise(r => setTimeout(r, 300));
                         }
                     }
 
@@ -341,8 +315,8 @@ class BotService {
                         }
                     }
 
-                    // STEP 3: Wait and check result
-                    await new Promise(r => setTimeout(r, 5000));
+                    // STEP 3: Wait and check result — faster check
+                    await new Promise(r => setTimeout(r, 2000));
 
                     const postClickState = await page.evaluate(() => {
                         if (document.querySelector('[aria-label="Leave call"], [aria-label="Leave meeting"]')) return 'IN_MEETING';
@@ -359,23 +333,23 @@ class BotService {
                         console.log(`[BotService] [SUCCESS] Successfully joined!`);
                         break;
                     } else if (postClickState === 'WAITING_ADMIT') {
-                        console.log(`[BotService] [WAIT] In lobby — waiting for host to admit...`);
-                        await new Promise(r => setTimeout(r, 5000));
+                        console.log(`[BotService] [WAIT] Waiting for host to admit...`);
+                        await new Promise(r => setTimeout(r, 3000));
+                        // Keep hasClickedJoin=true — don't re-click while waiting
                     } else {
-                        console.log(`[BotService] [RETRY] Post-click: still on lobby page. Will retry...`);
-                        // Reset so we try again on next loop
+                        console.log(`[BotService] [RETRY] Post-click: still on lobby. Retrying...`);
+                        // Reset ONLY name, keep click flag off so we try clicking again
                         hasTypedName = false;
                         hasClickedJoin = false;
+                        await new Promise(r => setTimeout(r, 1000));
                     }
 
                     continue;
                 }
 
-                // ═══════════════════════════════════════════
-                // STATE: WAITING / NEEDS_LOGIN — Still loading or needs auth.
-                // ═══════════════════════════════════════════
+                // STATE: WAITING / NEEDS_LOGIN
                 console.log(`[BotService] [WAIT] Page loading... (${state})`);
-                await new Promise(r => setTimeout(r, 4000));
+                await new Promise(r => setTimeout(r, 2000));
             }
 
             // Start the actual recording handler if we broke out of loop successfully
