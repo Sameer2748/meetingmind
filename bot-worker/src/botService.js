@@ -256,8 +256,9 @@ class BotService {
                 // Type name once, click join once, then transition.
                 // ═══════════════════════════════════════════
                 if (state === 'READY') {
-                    console.log(`[BotService] Lobby Ready.`);
+                    console.log(`[BotService] Lobby Ready. Waiting 2s before setup...`);
                     blockCount = 0;
+                    await new Promise(r => setTimeout(r, 2000));
 
                     // STEP 0: Dismiss "Got it" popup if present
                     try {
@@ -420,7 +421,8 @@ class BotService {
                         }
                         if (admitState === 'LOBBY') {
                             lobbyRetryCount++;
-                            console.log(`[BotService] [RETRY] Lobby reappeared (#${lobbyRetryCount}) — re-clicking join...`);
+                            console.log(`[BotService] [RETRY] Lobby reappeared (#${lobbyRetryCount}) — waiting 3s before re-click...`);
+                            await new Promise(r => setTimeout(r, 3000));
                             hasClickedJoin = false;
                             break;
                         }
