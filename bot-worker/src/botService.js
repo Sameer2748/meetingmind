@@ -131,6 +131,7 @@ class BotService {
             let hasTypedName = false;
             let hasClickedJoin = false;
             let joinAttempted = false; // tracks if we EVER clicked join this session
+            let lobbyRetryCount = 0;  // how many times lobby reappeared after clicking join
 
             for (let i = 0; i < 30; i++) {
                 // Check for stop signal
@@ -305,40 +306,70 @@ class BotService {
 
                     // STEP 2: Click the Join button
                     if (!hasClickedJoin) {
-                        let clicked = false;
-                        const btnXPaths = [
-                            '//button[contains(., "Ask to join")]',
-                            '//button[contains(., "Join now")]',
-                            '//button[contains(., "Join meeting")]',
-                            '//div[@role="button"][contains(., "Ask to join")]',
-                            '//div[@role="button"][contains(., "Join now")]',
-                        ];
-
-                        for (const xpath of btnXPaths) {
-                            try {
-                                const [btn] = await page.$x(xpath);
-                                if (btn) {
-                                    const box = await btn.boundingBox();
-                                    if (box) {
-                                        await btn.hover();
-                                        await new Promise(r => setTimeout(r, 300));
-                                        await btn.click();
-                                        clicked = true;
-                                        hasClickedJoin = true;
-                                        joinAttempted = true;
-                                        console.log(`[BotService] Clicked join button via XPath: ${xpath}`);
-                                        break;
-                                    }
-                                }
-                            } catch (e) { }
+                        // Bail early if we've retried too many times on this meeting
+                        if (lobbyRetryCount >= 5) {
+                            console.log(`[BotService] [GIVE UP] Lobby retry limit reached. This meeting won't admit the bot.`);
+                            await this.stopMeeting(meetingUrl);
+                            return;
                         }
 
+                        let clicked = false;
+
+                        // Strategy 1: Direct evaluate click (most reliable across Meet versions)
+                        try {
+                            clicked = await page.evaluate(() => {
+                                const allBtns = Array.from(document.querySelectorAll('button, div[role="button"]'));
+                                const joinBtn = allBtns.find(b => {
+                                    const lbl = ((b.innerText || '') + (b.getAttribute('aria-label') || '')).toLowerCase();
+                                    const isJoin = lbl.includes('join now') || lbl.includes('ask to join') || lbl.includes('join meeting');
+                                    if (!isJoin) return false;
+                                    const rect = b.getBoundingClientRect();
+                                    return rect.width > 0 && rect.height > 0;
+                                });
+                                if (joinBtn) { joinBtn.click(); return true; }
+                                return false;
+                            });
+                            if (clicked) console.log(`[BotService] Clicked join button via evaluate.`);
+                        } catch (e) { }
+
+                        // Strategy 2: XPath click
+                        if (!clicked) {
+                            const btnXPaths = [
+                                '//button[contains(., "Ask to join")]',
+                                '//button[contains(., "Join now")]',
+                                '//button[contains(., "Join meeting")]',
+                                '//div[@role="button"][contains(., "Ask to join")]',
+                                '//div[@role="button"][contains(., "Join now")]',
+                            ];
+                            for (const xpath of btnXPaths) {
+                                try {
+                                    const [btn] = await page.$x(xpath);
+                                    if (btn) {
+                                        const box = await btn.boundingBox();
+                                        if (box) {
+                                            await btn.hover();
+                                            await new Promise(r => setTimeout(r, 200));
+                                            await btn.click();
+                                            clicked = true;
+                                            console.log(`[BotService] Clicked join button via XPath: ${xpath}`);
+                                            break;
+                                        }
+                                    }
+                                } catch (e) { }
+                            }
+                        }
+
+                        // Strategy 3: Enter key fallback
                         if (!clicked) {
                             await page.keyboard.press('Enter');
-                            hasClickedJoin = true;
-                            joinAttempted = true;
+                            clicked = true;
                             console.log(`[BotService] Fallback: pressed Enter to join.`);
                         }
+
+                        hasClickedJoin = true;
+                        joinAttempted = true;
+                        // Give the page 1.5s to navigate away from lobby before polling
+                        await new Promise(r => setTimeout(r, 1500));
                     }
 
                     // STEP 3: After clicking, enter dedicated admission-wait loop.
@@ -387,8 +418,8 @@ class BotService {
                             break;
                         }
                         if (admitState === 'LOBBY') {
-                            console.log(`[BotService] [RETRY] Lobby reappeared — re-clicking join...`);
-                            rejectedBack = true;
+                            lobbyRetryCount++;
+                            console.log(`[BotService] [RETRY] Lobby reappeared (#${lobbyRetryCount}) — re-clicking join...`);
                             hasClickedJoin = false;
                             break;
                         }
