@@ -47,15 +47,15 @@ class BotService {
         console.log(`[BotService] Launching bot for: ${meetingUrl} | Name: "${botName}" | User: ${userEmail}`);
 
         // Fresh session dir every time — prevents Google profile fingerprinting
-        const sessionId = Date.now();
-        const sessionDir = path.resolve(this.sessionsDir, `session_${sessionId}`);
-        fs.mkdirSync(sessionDir, { recursive: true });
+        const chromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+        const userDataDir = path.join(process.cwd(), 'bot_chrome_data');
+        if (!fs.existsSync(userDataDir)) fs.mkdirSync(userDataDir, { recursive: true });
 
         try {
             const browser = await puppeteer.launch({
-                executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
+                executablePath: fs.existsSync(chromePath) ? chromePath : (process.env.PUPPETEER_EXECUTABLE_PATH || null),
                 headless: false,
-                userDataDir: sessionDir,
+                userDataDir: userDataDir,
                 ignoreDefaultArgs: ['--enable-automation'],
                 args: [
                     '--no-sandbox',
@@ -87,12 +87,27 @@ class BotService {
             });
 
             page.on('pageerror', err => {
+                // Silence noisy minified Meet errors that are not actionable
+                const msg = err.message || '';
+                if (msg.includes('_.') || msg.includes('Error') || msg.includes('Illegal invocation')) return;
                 console.error(`[Bot-PageError] ${err.message}`);
             });
 
             await page.setUserAgent(
                 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
             );
+
+            // ── LOAD COOKIES IF PRESENT ──────────────────────────────────────
+            const cookiePath = path.join(process.cwd(), 'google_cookies.json');
+            if (fs.existsSync(cookiePath)) {
+                try {
+                    const cookies = JSON.parse(fs.readFileSync(cookiePath, 'utf8'));
+                    await page.setCookie(...cookies);
+                    console.log(`[BotService] [AUTH] Loaded cookies from ${cookiePath}`);
+                } catch (e) {
+                    console.error(`[BotService] [WARN] Failed to load cookies:`, e.message);
+                }
+            }
 
             // Deep stealth masking
             await page.evaluateOnNewDocument(() => {
@@ -150,7 +165,8 @@ class BotService {
                 fileStream,
                 recordingPath,
                 userEmail,
-                sessionDir,
+                userDataDir,
+                isPersistent: userDataDir.includes('bot_chrome_data'),
                 status: 'joining',
                 stopSignal: false,
                 chunksReceived: 0,
@@ -496,11 +512,13 @@ class BotService {
                             const txt = document.body.innerText;
                             const lower = txt.toLowerCase();
 
-                            // Confirmed denial
+                            // Confirmed denial or session errors
                             if (
-                                txt.includes("You can't join this video call") ||
-                                txt.includes('Return to home screen') ||
-                                txt.includes('Returning to home screen')
+                                lower.includes("you can't join this video call") ||
+                                lower.includes('return to home screen') ||
+                                lower.includes('returning to home screen') ||
+                                lower.includes('credentials might have changed') ||
+                                lower.includes('sign-in credentials')
                             ) return 'DENIED';
 
                             // Lobby join button reappeared (denied or timeout)
@@ -786,7 +804,7 @@ class BotService {
 
         this.updateBotStatus(meetingUrl, 'saving');
 
-        const { fileStream, recordingPath, userEmail, browser, sessionDir, page } = bot;
+        const { fileStream, recordingPath, userEmail, browser, userDataDir, isPersistent, page } = bot;
 
         if (fileStream) {
             fileStream.end();
@@ -879,15 +897,17 @@ class BotService {
             }
         }
 
-        // Clean up session dir
-        if (sessionDir && fs.existsSync(sessionDir)) {
+        // Clean up session dir (only if not persistent)
+        if (userDataDir && !isPersistent && fs.existsSync(userDataDir)) {
             try {
                 await new Promise(r => setTimeout(r, 500));
-                fs.rmSync(sessionDir, { recursive: true, force: true });
-                console.log(`[BotService] [CLEANUP] Session dir removed: ${sessionDir}`);
+                fs.rmSync(userDataDir, { recursive: true, force: true });
+                console.log(`[BotService] [CLEANUP] Temporary session dir removed: ${userDataDir}`);
             } catch (e) {
-                console.error(`[BotService] [ERROR] Session cleanup failed:`, e.message);
+                console.error(`[BotService] [CLEANUP] Failed to remove session dir:`, e.message);
             }
+        } else if (isPersistent) {
+            console.log(`[BotService] [CLEANUP] Persistent profile preserved: ${userDataDir}`);
         }
 
         this.activeBots.delete(meetingUrl);
