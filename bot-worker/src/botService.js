@@ -188,56 +188,38 @@ class BotService {
                 }
 
                 // ── Detect current page state ──────────────────────────────
-                const state = await page.evaluate(() => {
-                    const url = window.location.href;
+                // Safely evaluate state
+                let state = 'LOADING';
+                try {
+                    if (page.isClosed()) break;
+                    state = await page.evaluate(() => {
+                        const url = window.location.href;
+                        if (!url.includes('meet.google.com')) return 'WRONG_PAGE';
+                        if (document.querySelector('[aria-label="Leave call"], [aria-label="Leave meeting"]')) return 'IN_MEETING';
 
-                    // Redirected away from Meet entirely
-                    if (!url.includes('meet.google.com')) return 'WRONG_PAGE';
+                        const txt = document.body.innerText;
+                        if (document.title === '' || txt.trim().length < 50) return 'LOADING';
 
-                    // Already inside the call
-                    if (document.querySelector('[aria-label="Leave call"], [aria-label="Leave meeting"]')) return 'IN_MEETING';
+                        const hasInput = !!document.querySelector('input');
+                        const allBtns = Array.from(document.querySelectorAll('button, div[role="button"]'));
+                        const hasJoinBtn = allBtns.some(b => {
+                            const lbl = ((b.innerText || '') + (b.getAttribute('aria-label') || '')).toLowerCase();
+                            return (lbl.includes('join now') || lbl.includes('ask to join') || lbl.includes('join meeting')) && b.getBoundingClientRect().width > 0;
+                        });
 
-                    const txt = document.body.innerText;
+                        if ((txt.includes("You can't join this video call") || txt.includes('Invalid video call name')) && !hasInput && !hasJoinBtn) return 'BLOCKED';
+                        if (txt.includes('Sign in') && !hasInput) return 'NEEDS_LOGIN';
+                        if (hasJoinBtn) return 'READY';
 
-                    // Page still loading (blank or tiny content)
-                    if (document.title === '' || txt.trim().length < 50) return 'LOADING';
-
-                    // True block: explicit error text with no lobby UI
-                    const hasInput = !!document.querySelector('input');
-                    const allBtns = Array.from(document.querySelectorAll('button, div[role="button"]'));
-                    const hasJoinBtn = allBtns.some(b => {
-                        const lbl = ((b.innerText || '') + (b.getAttribute('aria-label') || '')).toLowerCase();
-                        const isJoin = lbl.includes('join now') || lbl.includes('ask to join') || lbl.includes('join meeting');
-                        if (!isJoin) return false;
-                        const rect = b.getBoundingClientRect();
-                        return rect.width > 0 && rect.height > 0 && window.getComputedStyle(b).display !== 'none';
+                        const lower = txt.toLowerCase();
+                        if (lower.includes("let in soon") || lower.includes('waiting for the host') || lower.includes('someone will let you in')) return 'WAITING_ADMIT';
+                        return 'WAITING';
                     });
-
-                    if (
-                        (txt.includes("You can't join this video call") || txt.includes('Invalid video call name'))
-                        && !hasInput && !hasJoinBtn
-                    ) return 'BLOCKED';
-
-                    // Login wall
-                    if (txt.includes('Sign in') && !hasInput) return 'NEEDS_LOGIN';
-
-                    // Lobby with join button — READY to click
-                    if (hasJoinBtn) return 'READY';
-
-                    // Admit lobby: we clicked join and are waiting for host
-                    const lower = txt.toLowerCase();
-                    if (
-                        lower.includes("let in soon") ||
-                        lower.includes('waiting for the host') ||
-                        lower.includes('someone will let you in') ||
-                        lower.includes('waiting to be let in') ||
-                        lower.includes('asking to join') ||
-                        lower.includes('about to join') ||
-                        lower.includes('joining...')
-                    ) return 'WAITING_ADMIT';
-
-                    return 'WAITING';
-                });
+                } catch (e) {
+                    console.log(`[BotService] [DEBUG] State eval failed (likely navigation): ${e.message}`);
+                    await new Promise(r => setTimeout(r, 1000));
+                    continue;
+                }
 
                 console.log(`[BotService] [STATE] ${state} (Attempt ${i + 1}/40)`);
 
@@ -247,12 +229,25 @@ class BotService {
                     break;
                 }
 
-                // ── WAITING_ADMIT ──────────────────────────────────────────
                 if (state === 'WAITING_ADMIT') {
-                    this.updateBotStatus(meetingUrl, 'waiting_admit');
-                    console.log(`[BotService] [WAIT] Waiting for host to admit... (${i + 1}/40)`);
-                    await new Promise(r => setTimeout(r, 5000));
-                    continue;
+                    console.log(`[BotService] [ADMIT] Waiting for admission (up to 90s)...`);
+                    const admitted = await page.waitForSelector('[aria-label="Leave call"], [aria-label="Leave meeting"]', { timeout: 90000 }).catch(() => null);
+                    if (admitted) {
+                        console.log(`[BotService] [SUCCESS] Admitted to meeting!`);
+                        const bot = this.activeBots.get(meetingUrl);
+                        if (bot) {
+                            bot.startTime = Date.now();
+                            this.updateBotStatus(meetingUrl, 'recording');
+                            await this.handleRecording(bot, meetingUrl);
+                        }
+                        return;
+                    } else {
+                        console.warn(`[BotService] Admission timeout or denial.`);
+                        await page.reload({ waitUntil: 'networkidle2' });
+                        hasTypedName = false;
+                        hasClickedJoin = false;
+                        continue;
+                    }
                 }
 
                 // ── BLOCKED ────────────────────────────────────────────────
@@ -285,17 +280,14 @@ class BotService {
                 if (state === 'WRONG_PAGE') {
                     console.log(`[BotService] [REDIRECT] Off Meet — re-navigating...`);
                     await page.goto(meetingUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-                    await new Promise(r => setTimeout(r, 800));
                     hasTypedName = false;
                     hasClickedJoin = false;
-                    joinAttempted = false;
-                    blockCount = 0;
                     continue;
                 }
 
                 // ── NEEDS_LOGIN ────────────────────────────────────────────
                 if (state === 'NEEDS_LOGIN') {
-                    console.log(`[BotService] [WARN] Google sign-in wall detected. Bot cannot proceed without auth.`);
+                    console.log(`[BotService] [WARN] Google sign-in wall. Login via setup-login.js!`);
                     await new Promise(r => setTimeout(r, 5000));
                     continue;
                 }
@@ -783,150 +775,152 @@ class BotService {
         const bot = this.activeBots.get(meetingUrl);
         if (!bot) return;
 
-        // Prevent duplicate stop calls
-        if (bot.status === 'stopping') return;
-        bot.status = 'stopping';
-        bot.stopSignal = true;
+        try {
 
-        this.updateBotStatus(meetingUrl, 'saving');
+            // Prevent duplicate stop calls
+            if (bot.status === 'stopping') return;
+            bot.status = 'stopping';
+            bot.stopSignal = true;
 
-        const { fileStream, recordingPath, userEmail, browser, userDataDir, isPersistent, page } = bot;
+            this.updateBotStatus(meetingUrl, 'saving');
 
-        if (fileStream) {
-            fileStream.end();
+            const { fileStream, recordingPath, userEmail, browser, userDataDir, isPersistent, page } = bot;
 
-            if (bot.chunksReceived > 0) {
-                console.log(`[BotService] Recording finalized: ${recordingPath} (${bot.chunksReceived} chunks)`);
+            if (fileStream) {
+                fileStream.end();
 
-                (async () => {
-                    try {
-                        // 1. Duration
-                        let duration = 0;
+                if (bot.chunksReceived > 0) {
+                    console.log(`[BotService] Recording finalized: ${recordingPath} (${bot.chunksReceived} chunks)`);
+
+                    (async () => {
                         try {
-                            const meta = await mm.parseFile(recordingPath);
-                            duration = Math.round(meta.format.duration || 0);
-                            if (duration <= 0 && bot.startTime) {
-                                duration = Math.round((Date.now() - bot.startTime) / 1000);
+                            // 1. Duration
+                            let duration = 0;
+                            try {
+                                const meta = await mm.parseFile(recordingPath);
+                                duration = Math.round(meta.format.duration || 0);
+                                if (duration <= 0 && bot.startTime) {
+                                    duration = Math.round((Date.now() - bot.startTime) / 1000);
+                                }
+                            } catch (e) {
+                                if (bot.startTime) duration = Math.round((Date.now() - bot.startTime) / 1000);
                             }
-                        } catch (e) {
-                            if (bot.startTime) duration = Math.round((Date.now() - bot.startTime) / 1000);
-                        }
-                        console.log(`[BotService] Duration: ${duration}s`);
+                            console.log(`[BotService] Duration: ${duration}s`);
 
-                        // 2. Save initial DB record
-                        const recordingId = await dbService.saveRecording({
-                            meeting_url: meetingUrl,
-                            user_email: userEmail,
-                            file_path: recordingPath,
-                            status: 'local',
-                            duration,
-                        });
+                            // 2. Save initial DB record
+                            const recordingId = await dbService.saveRecording({
+                                meeting_url: meetingUrl,
+                                user_email: userEmail,
+                                file_path: recordingPath,
+                                status: 'local',
+                                duration,
+                            });
 
-                        // 3. Upload to S3
-                        const cloudUrl = await storageService.uploadRecording(recordingPath, userEmail);
+                            // 3. Upload to S3
+                            const cloudUrl = await storageService.uploadRecording(recordingPath, userEmail);
 
-                        // 4. Update DB with S3 URL
-                        await dbService.saveRecording({ id: recordingId, s3_url: cloudUrl, status: 'uploaded' });
+                            // 4. Update DB with S3 URL
+                            await dbService.saveRecording({ id: recordingId, s3_url: cloudUrl, status: 'uploaded' });
 
-                        // 5. Transcribe
-                        const transcriptBundle = await transcriptionService.transcribe(cloudUrl, userEmail, recordingPath);
+                            // 5. Transcribe
+                            const transcriptBundle = await transcriptionService.transcribe(cloudUrl, userEmail, recordingPath);
 
-                        if (transcriptBundle && recordingId) {
-                            await dbService.updateTranscriptId(recordingId, transcriptBundle.id || 'deepgram-sync');
+                            if (transcriptBundle && recordingId) {
+                                await dbService.updateTranscriptId(recordingId, transcriptBundle.id || 'deepgram-sync');
 
-                            const result = await transcriptionService.waitForCompletion(transcriptBundle);
+                                const result = await transcriptionService.waitForCompletion(transcriptBundle);
 
-                            if (result) {
-                                const transcriptFileName = `transcript-${recordingId}.txt`;
-                                const transcriptUrl = await storageService.uploadText(result.formatted, transcriptFileName, userEmail);
-                                await dbService.saveTranscriptResult(recordingId, result.formatted, transcriptUrl, result.words || null);
+                                if (result) {
+                                    const transcriptFileName = `transcript-${recordingId}.txt`;
+                                    const transcriptUrl = await storageService.uploadText(result.formatted, transcriptFileName, userEmail);
+                                    await dbService.saveTranscriptResult(recordingId, result.formatted, transcriptUrl, result.words || null);
 
-                                if (result.raw?.metadata?.duration) {
-                                    const finalDuration = Math.round(result.raw.metadata.duration);
-                                    await dbService.saveRecording({ id: recordingId, duration: finalDuration });
-                                    console.log(`[BotService] Final duration from Deepgram: ${finalDuration}s`);
+                                    if (result.raw?.metadata?.duration) {
+                                        const finalDuration = Math.round(result.raw.metadata.duration);
+                                        await dbService.saveRecording({ id: recordingId, duration: finalDuration });
+                                        console.log(`[BotService] Final duration from Deepgram: ${finalDuration}s`);
+                                    }
                                 }
                             }
+
+                            console.log(`[BotService] [DONE] Post-processing complete for recording ${recordingId}`);
+                        } catch (err) {
+                            console.error('[BotService] Post-processing failed:', err.message);
                         }
-
-                        console.log(`[BotService] [DONE] Post-processing complete for recording ${recordingId}`);
-                    } catch (err) {
-                        console.error('[BotService] Post-processing failed:', err.message);
+                    })();
+                } else {
+                    console.log(`[BotService] No audio received — skipping S3/DB save.`);
+                    if (fs.existsSync(recordingPath)) {
+                        try { fs.unlinkSync(recordingPath); } catch (e) { }
                     }
-                })();
-            } else {
-                console.log(`[BotService] No audio received — skipping S3/DB save.`);
-                if (fs.existsSync(recordingPath)) {
-                    try { fs.unlinkSync(recordingPath); } catch (e) { }
                 }
             }
-        }
 
-        // Close browser
-        if (browser) {
-            console.log(`[BotService] Closing browser for ${meetingUrl}`);
-            try {
-                if (page && !page.isClosed()) {
-                    await page.evaluate(() => {
-                        const leaveBtn = document.querySelector('[aria-label="Leave call"], [aria-label="Leave meeting"]');
-                        if (leaveBtn) leaveBtn.click();
-                    }).catch(() => { });
-                    await new Promise(r => setTimeout(r, 800));
+            // Close browser
+            if (browser) {
+                console.log(`[BotService] Closing browser for ${meetingUrl}`);
+                try {
+                    if (page && !page.isClosed()) {
+                        await page.evaluate(() => {
+                            const leaveBtn = document.querySelector('[aria-label="Leave call"], [aria-label="Leave meeting"]');
+                            if (leaveBtn) leaveBtn.click();
+                        }).catch(() => { });
+                        await new Promise(r => setTimeout(r, 800));
+                    }
+                    const proc = browser.process();
+                    await browser.close().catch(() => { });
+                    if (proc?.pid) {
+                        try { process.kill(proc.pid, 'SIGKILL'); } catch (e) { }
+                    }
+                } catch (e) {
+                    console.error('[BotService] Browser close error:', e.message);
                 }
-                const proc = browser.process();
-                await browser.close().catch(() => { });
-                if (proc?.pid) {
-                    try { process.kill(proc.pid, 'SIGKILL'); } catch (e) { }
+            }
+
+            // Clean up session dir (only if not persistent)
+            if (userDataDir && !isPersistent && fs.existsSync(userDataDir)) {
+                try {
+                    await new Promise(r => setTimeout(r, 500));
+                    fs.rmSync(userDataDir, { recursive: true, force: true });
+                    console.log(`[BotService] [CLEANUP] Temporary session dir removed: ${userDataDir}`);
+                } catch (e) {
+                    console.error(`[BotService] [CLEANUP] Failed to remove session dir:`, e.message);
                 }
-            } catch (e) {
-                console.error('[BotService] Browser close error:', e.message);
+            } else if (isPersistent) {
+                console.log(`[BotService] [CLEANUP] Persistent profile preserved: ${userDataDir}`);
             }
-        }
 
-        // Clean up session dir (only if not persistent)
-        if (userDataDir && !isPersistent && fs.existsSync(userDataDir)) {
-            try {
-                await new Promise(r => setTimeout(r, 500));
-                fs.rmSync(userDataDir, { recursive: true, force: true });
-                console.log(`[BotService] [CLEANUP] Temporary session dir removed: ${userDataDir}`);
-            } catch (e) {
-                console.error(`[BotService] [CLEANUP] Failed to remove session dir:`, e.message);
+            this.activeBots.delete(meetingUrl);
+        } catch (err) {
+            console.error(`[BotService] [ERROR] stopMeeting crashed: ${err.message}`);
+            if (err.message.includes('existing browser session')) {
+                console.error(`👉 Please CLOSE any existing Chrome windows opened by 'setup-login.js' before starting.`);
             }
-        } else if (isPersistent) {
-            console.log(`[BotService] [CLEANUP] Persistent profile preserved: ${userDataDir}`);
+            if (browser) await browser.close().catch(() => { });
+            this.activeBots.delete(meetingUrl);
         }
-
-        this.activeBots.delete(meetingUrl);
-    } catch(err) {
-        console.error(`[BotService] [ERROR] joinMeeting crashed: ${err.message}`);
-        if (err.message.includes('existing browser session')) {
-            console.error(`👉 Please CLOSE any existing Chrome windows opened by 'setup-login.js' before starting.`);
-        }
-        if (browser) await browser.close().catch(() => { });
-        this.activeBots.delete(meetingUrl);
     }
-}
 
     // ─────────────────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────────────────
     async updateBotStatus(meetingUrl, status) {
-    const bot = this.activeBots.get(meetingUrl);
-    if (bot) {
-        bot.status = status;
-        console.log(`[BotService] [STATUS] ${meetingUrl} → ${status}`);
-        try {
-            await redis.set(`bot-status:${meetingUrl}`, status, 'EX', 3600);
-        } catch (e) {
-            console.error('[BotService] Redis status update failed:', e.message);
+        const bot = this.activeBots.get(meetingUrl);
+        if (bot) {
+            bot.status = status;
+            console.log(`[BotService] [STATUS] ${meetingUrl} → ${status}`);
+            try {
+                await redis.set(`bot-status:${meetingUrl}`, status, 'EX', 3600);
+            } catch (e) {
+                console.error('[BotService] Redis status update failed:', e.message);
+            }
         }
     }
-}
 
-getBotStatus(meetingUrl) {
-    const bot = this.activeBots.get(meetingUrl);
-    return bot ? bot.status : 'not_found';
-}
+    getBotStatus(meetingUrl) {
+        const bot = this.activeBots.get(meetingUrl);
+        return bot ? bot.status : 'not_found';
+    }
 }
 
 module.exports = new BotService();
