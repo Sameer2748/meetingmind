@@ -776,6 +776,20 @@ export default function RecordingDetails() {
                                 <h3 className="text-2xl font-semibold tracking-tight">Full Transcript</h3>
                                 {recording.transcript_text && (
                                     <div className="flex items-center gap-2">
+                                        {/* Sync Toggle */}
+                                        <button
+                                            onClick={() => setSyncEnabled(v => !v)}
+                                            title={syncEnabled ? "Disable transcript sync" : "Enable transcript sync"}
+                                            className={cn(
+                                                "flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border",
+                                                syncEnabled
+                                                    ? "bg-primary text-white border-primary shadow-sm shadow-primary/20"
+                                                    : "bg-muted text-muted-foreground border-border/40 hover:border-primary/30"
+                                            )}
+                                        >
+                                            <Zap className={cn("w-3.5 h-3.5", syncEnabled && "fill-white")} />
+                                            Sync
+                                        </button>
                                         <div className="relative flex items-center">
                                             <input
                                                 ref={searchInputRef}
@@ -803,18 +817,10 @@ export default function RecordingDetails() {
                                                 <span className="text-xs font-medium text-muted-foreground tabular-nums min-w-[3.5rem] text-center">
                                                     {totalMatches > 0 ? `${currentMatchIndex + 1}/${totalMatches}` : '0/0'}
                                                 </span>
-                                                <button
-                                                    onClick={goToPrevMatch}
-                                                    disabled={totalMatches === 0}
-                                                    className="p-1 rounded-lg hover:bg-muted disabled:opacity-30 transition-colors"
-                                                >
+                                                <button onClick={goToPrevMatch} disabled={totalMatches === 0} className="p-1 rounded-lg hover:bg-muted disabled:opacity-30 transition-colors">
                                                     <ChevronUp className="w-4 h-4" />
                                                 </button>
-                                                <button
-                                                    onClick={goToNextMatch}
-                                                    disabled={totalMatches === 0}
-                                                    className="p-1 rounded-lg hover:bg-muted disabled:opacity-30 transition-colors"
-                                                >
+                                                <button onClick={goToNextMatch} disabled={totalMatches === 0} className="p-1 rounded-lg hover:bg-muted disabled:opacity-30 transition-colors">
                                                     <ChevronDown className="w-4 h-4" />
                                                 </button>
                                             </div>
@@ -827,86 +833,104 @@ export default function RecordingDetails() {
                                     <div className="space-y-10">
                                         {(() => {
                                             let globalMatchCounter = 0;
-                                            return parsedTranscript.map((utterance, i) => (
-                                                <div key={i} className="group/para">
-                                                    <div className="flex items-center gap-3 mb-3">
-                                                        {(() => {
-                                                            const colors = [
-                                                                'bg-primary/15 text-primary',
-                                                                'bg-blue-500/15 text-blue-600',
-                                                                'bg-emerald-500/15 text-emerald-600',
-                                                                'bg-violet-500/15 text-violet-600',
-                                                                'bg-amber-500/15 text-amber-600',
-                                                            ];
-                                                            // Fallback logic to pick a color based on speaker ID (e.g. "0", "1", or "A")
-                                                            const speakerIdx = isNaN(parseInt(utterance.speaker))
-                                                                ? utterance.speaker.charCodeAt(0) % colors.length
-                                                                : parseInt(utterance.speaker) % colors.length;
-                                                            const colorClass = colors[speakerIdx];
+                                            // Find active segment index for sync highlighting
+                                            const activeSegIdx = syncEnabled
+                                                ? parsedTranscript.reduce((best, u, idx) =>
+                                                    timeToSeconds(u.time) <= currentTime ? idx : best, -1)
+                                                : -1;
+                                            return parsedTranscript.map((utterance, i) => {
+                                                const isActive = i === activeSegIdx;
+                                                return (
+                                                    <div key={i} className={cn(
+                                                        "group/para rounded-2xl p-3 -mx-3 transition-all duration-300",
+                                                        isActive && "bg-primary/5 border-l-4 border-primary pl-4"
+                                                    )}>
+                                                        <div className="flex items-center gap-3 mb-3">
+                                                            {(() => {
+                                                                const colors = [
+                                                                    'bg-primary/15 text-primary',
+                                                                    'bg-blue-500/15 text-blue-600',
+                                                                    'bg-emerald-500/15 text-emerald-600',
+                                                                    'bg-violet-500/15 text-violet-600',
+                                                                    'bg-amber-500/15 text-amber-600',
+                                                                ];
+                                                                // Fallback logic to pick a color based on speaker ID (e.g. "0", "1", or "A")
+                                                                const speakerIdx = isNaN(parseInt(utterance.speaker))
+                                                                    ? utterance.speaker.charCodeAt(0) % colors.length
+                                                                    : parseInt(utterance.speaker) % colors.length;
+                                                                const colorClass = colors[speakerIdx];
 
-                                                            return (
-                                                                <div className={`w-8 h-8 rounded-lg ${colorClass} flex items-center justify-center text-[10px] font-bold uppercase`}>
-                                                                    S{utterance.speaker}
-                                                                </div>
-                                                            );
-                                                        })()}
-                                                        <button
-                                                            onClick={() => seekToTime(utterance.time)}
-                                                            className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground opacity-50 group-hover/para:opacity-100 transition-opacity hover:text-primary cursor-pointer"
-                                                        >
-                                                            Speaker {utterance.speaker} &bull; {utterance.time}
-                                                        </button>
-                                                    </div>
-                                                    <p className="opacity-80 group-hover/para:opacity-100 transition-opacity leading-relaxed font-normal">
-                                                        {(() => {
-                                                            if (!searchQuery.trim()) return utterance.text;
-
-                                                            const query = searchQuery.toLowerCase();
-                                                            const text = utterance.text;
-                                                            const parts: React.ReactNode[] = [];
-                                                            let lastIndex = 0;
-                                                            let lowerText = text.toLowerCase();
-                                                            let idx = lowerText.indexOf(query);
-
-                                                            while (idx !== -1) {
-                                                                if (idx > lastIndex) {
-                                                                    parts.push(text.substring(lastIndex, idx));
-                                                                }
-                                                                const matchIdx = globalMatchCounter;
-                                                                const isCurrentMatch = matchIdx === currentMatchIndex;
-                                                                const matchCharOffset = idx;
-                                                                parts.push(
-                                                                    <span
-                                                                        key={`match-${i}-${idx}`}
-                                                                        ref={(el) => { matchRefs.current[matchIdx] = el; }}
-                                                                        onClick={() => {
-                                                                            const exactTime = findWordTimestamp(text, matchCharOffset, utterance.time);
-                                                                            seekToSeconds(exactTime);
-                                                                        }}
-                                                                        className={cn(
-                                                                            "px-0.5 rounded cursor-pointer transition-all",
-                                                                            isCurrentMatch
-                                                                                ? "bg-primary text-white font-semibold shadow-sm shadow-primary/30"
-                                                                                : "bg-primary/20 text-foreground hover:bg-primary/30"
-                                                                        )}
-                                                                    >
-                                                                        {text.substring(idx, idx + searchQuery.length)}
-                                                                    </span>
+                                                                return (
+                                                                    <div className={`w-8 h-8 rounded-lg ${colorClass} flex items-center justify-center text-[10px] font-bold uppercase`}>
+                                                                        S{utterance.speaker}
+                                                                    </div>
                                                                 );
-                                                                globalMatchCounter++;
-                                                                lastIndex = idx + searchQuery.length;
-                                                                idx = lowerText.indexOf(query, lastIndex);
-                                                            }
+                                                            })()}
+                                                            <button
+                                                                onClick={() => seekToTime(utterance.time)}
+                                                                className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground opacity-50 group-hover/para:opacity-100 transition-opacity hover:text-primary cursor-pointer"
+                                                            >
+                                                                Speaker {utterance.speaker} &bull; {utterance.time}
+                                                            </button>
+                                                        </div>
+                                                        <p className="opacity-80 group-hover/para:opacity-100 transition-opacity leading-relaxed font-normal">
+                                                            {(() => {
+                                                                const text = utterance.text;
 
-                                                            if (lastIndex < text.length) {
-                                                                parts.push(text.substring(lastIndex));
-                                                            }
+                                                                // Search highlighting mode
+                                                                if (searchQuery.trim()) {
+                                                                    const query = searchQuery.toLowerCase();
+                                                                    const parts: React.ReactNode[] = [];
+                                                                    let lastIndex = 0;
+                                                                    const lowerText = text.toLowerCase();
+                                                                    let idx = lowerText.indexOf(query);
+                                                                    while (idx !== -1) {
+                                                                        if (idx > lastIndex) parts.push(text.substring(lastIndex, idx));
+                                                                        const matchIdx = globalMatchCounter;
+                                                                        const isCurrentMatch = matchIdx === currentMatchIndex;
+                                                                        const charOffset = idx;
+                                                                        parts.push(
+                                                                            <span
+                                                                                key={`m-${i}-${idx}`}
+                                                                                ref={(el) => { matchRefs.current[matchIdx] = el; }}
+                                                                                onClick={() => seekToSeconds(findWordTimestamp(text, charOffset, utterance.time))}
+                                                                                className={cn(
+                                                                                    "px-0.5 rounded cursor-pointer transition-all",
+                                                                                    isCurrentMatch
+                                                                                        ? "bg-primary text-white font-semibold shadow-sm shadow-primary/30"
+                                                                                        : "bg-primary/20 text-foreground hover:bg-primary/30"
+                                                                                )}
+                                                                            >
+                                                                                {text.substring(idx, idx + searchQuery.length)}
+                                                                            </span>
+                                                                        );
+                                                                        globalMatchCounter++;
+                                                                        lastIndex = idx + searchQuery.length;
+                                                                        idx = lowerText.indexOf(query, lastIndex);
+                                                                    }
+                                                                    if (lastIndex < text.length) parts.push(text.substring(lastIndex));
+                                                                    return parts;
+                                                                }
 
-                                                            return parts;
-                                                        })()}
-                                                    </p>
-                                                </div>
-                                            ));
+                                                                // Sync mode — each word is clickable
+                                                                if (syncEnabled) {
+                                                                    return text.split(/\s+/).map((word, wi) => (
+                                                                        <span
+                                                                            key={wi}
+                                                                            onClick={() => seekToSeconds(findWordTimestamp(text, text.split(/\s+/).slice(0, wi).join(' ').length + (wi > 0 ? 1 : 0), utterance.time))}
+                                                                            className="cursor-pointer hover:text-primary hover:bg-primary/10 rounded px-0.5 transition-colors"
+                                                                        >
+                                                                            {word}{' '}
+                                                                        </span>
+                                                                    ));
+                                                                }
+
+                                                                return text;
+                                                            })()}
+                                                        </p>
+                                                    </div>
+                                                );
+                                            });
                                         })()}
                                     </div>
                                 ) : (
