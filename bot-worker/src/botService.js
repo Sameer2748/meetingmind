@@ -32,99 +32,102 @@ class BotService {
 
     async initBrowserPool() {
         console.log(`[BotService] Initializing ${this.poolSize} persistent bot browsers...`);
+        this.browserPool = []; // Safety: Reset pool before re-init
+
+        // DOWNLOAD profiles from S3 if local folder is empty
+        const localProfiles = fs.existsSync(this.sessionsDir) ? fs.readdirSync(this.sessionsDir) : [];
+        if (localProfiles.length === 0) {
+            await storageService.downloadProfilesFromS3(this.sessionsDir);
+        }
+
         for (let i = 0; i < this.poolSize; i++) {
-            const profileDir = path.join(this.sessionsDir, `bot-${i}`);
-            const context = await chromium.launchPersistentContext(profileDir, {
-                headless: false,
-                args: [
-                    '--use-fake-ui-for-media-stream',
-                    '--use-fake-device-for-media-stream',
-                    '--disable-blink-features=AutomationControlled',
-                    '--no-sandbox',
-                    '--disable-infobars',
-                    '--mute-audio',
-                ],
-                viewport: { width: 1280, height: 720 },
-                permissions: ['microphone', 'camera'],
-                userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-                bypassCSP: true,
-                ignoreHTTPSErrors: true
-            });
-
-            const page = context.pages()[0] || await context.newPage();
-            await page.goto('https://meet.google.com', { waitUntil: 'domcontentloaded' });
-
-            const needsLogin = await page.evaluate(() => {
-                const hasAvatar = !!document.querySelector('[aria-label*="Google Account"], img[src*="googleusercontent.com"]');
-                const hasNewMeeting = Array.from(document.querySelectorAll('button')).some(b => b.innerText.includes('New meeting'));
-                return !hasAvatar && !hasNewMeeting;
-            });
-
-            if (needsLogin) {
-                console.log(`[BotService] ⚠️  Bot ${i} needs authentication!`);
-                let loginAttempts = 0;
-                while (loginAttempts < 120) {
-                    try {
-                        await new Promise(r => setTimeout(r, 5000));
-                        if (page.isClosed()) break;
-                        const stillNeeds = await page.evaluate(() => {
-                            return !document.querySelector('[aria-label*="Google Account"], img[src*="googleusercontent.com"]');
-                        }).catch(() => true);
-                        if (!stillNeeds) {
-                            console.log(`[BotService] ✓ Bot ${i} authenticated!`);
-                            break;
-                        }
-                    } catch (e) { break; }
-                    loginAttempts++;
-                }
-            } else {
-                console.log(`[BotService] ✓ Bot ${i} already authenticated`);
-            }
-
-            let activePage = page;
-            let activeContext = context;
-            if (page.isClosed()) {
-                activeContext = await chromium.launchPersistentContext(profileDir, {
-                    headless: false,
-                    args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--no-sandbox', '--mute-audio'],
-                    viewport: { width: 1280, height: 720 },
-                    permissions: ['microphone', 'camera']
-                });
-                activePage = activeContext.pages()[0] || await activeContext.newPage();
-            }
-
-            // REGISTER FUNCTIONS ONCE PER PAGE
-            await activePage.exposeFunction('sendAudioChunk', (base64) => {
-                const bot = this.browserPool.find(b => b.id === i);
-                if (!bot || !bot.currentMeetingUrl) return;
-                const active = this.activeBots.get(bot.currentMeetingUrl);
-                if (!base64 || !active || !active.fileStream) return;
-
-                const buffer = Buffer.from(base64, 'base64');
-                active.fileStream.write(buffer);
-                active.chunksReceived++;
-                if (active.chunksReceived % 5 === 0) {
-                    console.log(`[Bot ${i}] 🎙️  Recording active... (${active.chunksReceived}s)`);
-                }
-            });
-
-            await activePage.exposeFunction('onMeetingEnd', async () => {
-                const bot = this.browserPool.find(b => b.id === i);
-                if (bot && bot.currentMeetingUrl) {
-                    console.log(`[Bot ${i}] Signal: Meeting Ended`);
-                    await this.stopMeeting(bot.currentMeetingUrl);
-                }
-            });
-
-            this.browserPool.push({
-                context: activeContext,
-                page: activePage,
-                inUse: false,
-                id: i,
-                currentMeetingUrl: null
-            });
+            await this.launchBot(i);
         }
         console.log(`[BotService] ✓ ${this.poolSize} bots ready`);
+    }
+
+    async launchBot(botId) {
+        const profileDir = path.join(this.sessionsDir, `bot-${botId}`);
+        const context = await chromium.launchPersistentContext(profileDir, {
+            headless: process.env.HEADLESS === 'true',
+            args: [
+                '--use-fake-ui-for-media-stream',
+                '--use-fake-device-for-media-stream',
+                '--disable-blink-features=AutomationControlled',
+                '--no-sandbox',
+                '--disable-infobars',
+                '--mute-audio',
+            ],
+            viewport: { width: 1280, height: 720 },
+            permissions: ['microphone', 'camera'],
+            userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            bypassCSP: true,
+            ignoreHTTPSErrors: true
+        });
+
+        const page = context.pages()[0] || await context.newPage();
+
+        // Register functions ONCE per page
+        await page.exposeFunction('sendAudioChunk', (base64) => {
+            const bot = this.browserPool.find(b => b.id === botId);
+            if (!bot || !bot.currentMeetingUrl) return;
+            const active = this.activeBots.get(bot.currentMeetingUrl);
+            if (!base64 || !active || !active.fileStream) return;
+            const buffer = Buffer.from(base64, 'base64');
+            active.fileStream.write(buffer);
+            active.chunksReceived++;
+            if (active.chunksReceived % 5 === 0) {
+                console.log(`[Bot ${botId}] 🎙️  Recording active... (${active.chunksReceived}s)`);
+            }
+        });
+
+        await page.exposeFunction('onMeetingEnd', async () => {
+            const bot = this.browserPool.find(b => b.id === botId);
+            if (bot && bot.currentMeetingUrl) {
+                console.log(`[Bot ${botId}] Signal: Meeting Ended`);
+                await this.stopMeeting(bot.currentMeetingUrl);
+            }
+        });
+
+        // Check login
+        await page.goto('https://meet.google.com', { waitUntil: 'domcontentloaded' });
+        const needsLogin = await page.evaluate(() => {
+            const hasAvatar = !!document.querySelector('[aria-label*="Google Account"], img[src*="googleusercontent.com"]');
+            const hasNewMeeting = Array.from(document.querySelectorAll('button')).some(b => b.innerText.includes('New meeting'));
+            return !hasAvatar && !hasNewMeeting;
+        });
+
+        if (needsLogin) {
+            console.log(`[BotService] ⚠️  Bot ${botId} needs authentication!`);
+            let loginAttempts = 0;
+            let authenticated = false;
+            while (loginAttempts < 120) {
+                try {
+                    await new Promise(r => setTimeout(r, 5000));
+                    if (page.isClosed()) break;
+                    const stillNeeds = await page.evaluate(() => {
+                        return !document.querySelector('[aria-label*="Google Account"], img[src*="googleusercontent.com"]');
+                    }).catch(() => true);
+                    if (!stillNeeds) {
+                        console.log(`[BotService] ✓ Bot ${botId} authenticated!`);
+                        authenticated = true;
+                        break;
+                    }
+                } catch (e) { break; }
+                loginAttempts++;
+            }
+
+            if (authenticated) {
+                console.log(`[BotService] ⬆️  Syncing session for Bot ${botId} to S3...`);
+                await context.close();
+                await storageService.syncProfilesToS3(this.sessionsDir);
+                return this.launchBot(botId); // Re-launch correctly
+            }
+        } else {
+            console.log(`[BotService] ✓ Bot ${botId} ready`);
+        }
+
+        this.browserPool.push({ context, page, inUse: false, id: botId, currentMeetingUrl: null });
     }
 
     getAvailableBot() {
@@ -299,7 +302,15 @@ class BotService {
                                 await dbService.saveTranscriptResult(id, res.formatted, s3Url, res.words || null);
                             }
                         }
-                    } catch (e) { console.error(`[Bot ${botId}] Save Error:`, e.message); }
+
+                        // CLEANUP: Delete local recording file after successful upload/processing
+                        if (fs.existsSync(recordingPath)) {
+                            fs.unlinkSync(recordingPath);
+                            console.log(`[Bot ${botId}] Local file deleted to save space: ${path.basename(recordingPath)}`);
+                        }
+                    } catch (e) {
+                        console.error(`[Bot ${botId}] Save/Cleanup Error:`, e.message);
+                    }
                 })();
             }
         }
