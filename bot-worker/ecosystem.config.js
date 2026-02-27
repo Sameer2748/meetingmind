@@ -14,7 +14,7 @@ module.exports = {
                 NODE_ENV: 'production',
                 HEADLESS: 'true',
                 DOCKER_RUN: 'false',
-                FORCE_SYNC: 'true'
+                FORCE_SYNC: 'false'
             }
         }
     ]
