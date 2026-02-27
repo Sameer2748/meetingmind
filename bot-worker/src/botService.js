@@ -97,44 +97,47 @@ class BotService {
 
         console.log(`[BotService] ✓ Bot ${botId} ready`);
 
-        // UI Mode: Help with initial sync
-        if (process.env.HEADLESS === 'false' && !process.env.SYNCED_ONCE) {
-            console.log(`[BotService] ⬆️  UI Mode: Open browser to sync profiles to S3...`);
-            await page.goto('https://meet.google.com', { waitUntil: 'domcontentloaded' });
+        // UI Mode: Help with initial sync or just show the page
+        if (process.env.HEADLESS !== 'true') {
+            await page.goto('https://meet.google.com', { waitUntil: 'domcontentloaded' }).catch(e => console.log(`[Bot ${botId}] Initial navigation failed: ${e.message}`));
 
-            const checkAuth = async () => {
-                try {
-                    return await page.evaluate(() => {
-                        return !!document.querySelector('[aria-label*="Google Account"], img[src*="googleusercontent.com"]') ||
-                            Array.from(document.querySelectorAll('button')).some(b => b.innerText.includes('New meeting'));
-                    });
-                } catch (e) { return false; }
-            };
+            if (!process.env.SYNCED_ONCE) {
+                console.log(`[BotService] ⬆️  UI Mode: Syncing profile for Bot ${botId} to S3...`);
 
-            let authenticated = await checkAuth();
-            if (!authenticated) {
-                console.log('[BotService] ⚠️  Authentication needed. Please login in the browser window.');
-                // Stay on page and wait for manual login
-                for (let i = 0; i < 60; i++) {
-                    await new Promise(r => setTimeout(r, 5000));
-                    if (await checkAuth()) {
-                        authenticated = true;
-                        break;
+                const checkAuth = async () => {
+                    try {
+                        return await page.evaluate(() => {
+                            return !!document.querySelector('[aria-label*="Google Account"], img[src*="googleusercontent.com"]') ||
+                                Array.from(document.querySelectorAll('button')).some(b => b.innerText.includes('New meeting'));
+                        });
+                    } catch (e) { return false; }
+                };
+
+                let authenticated = await checkAuth();
+                if (!authenticated) {
+                    console.log('[BotService] ⚠️  Authentication needed. Please login in the browser window.');
+                    // Wait for manual login (up to 5 mins)
+                    for (let i = 0; i < 60; i++) {
+                        await new Promise(r => setTimeout(r, 5000));
+                        if (await checkAuth()) {
+                            authenticated = true;
+                            break;
+                        }
                     }
                 }
-            }
 
-            if (authenticated) {
-                console.log('[BotService] ✓ Session detected. Syncing to S3...');
-                process.env.SYNCED_ONCE = 'true';
-                await context.close();
-                await storageService.syncProfilesToS3(this.sessionsDir);
-                if (!process.env.RELAUNCHED) {
-                    process.env.RELAUNCHED = 'true';
-                    return this.launchBot(botId);
+                if (authenticated) {
+                    console.log('[BotService] ✓ Session detected. Syncing to S3...');
+                    process.env.SYNCED_ONCE = 'true';
+                    await context.close();
+                    await storageService.syncProfilesToS3(this.sessionsDir);
+                    if (!process.env.RELAUNCHED) {
+                        process.env.RELAUNCHED = 'true';
+                        return this.launchBot(botId);
+                    }
+                } else {
+                    console.log('[BotService] ❌ Authentication not detected. Proceeding anyway.');
                 }
-            } else {
-                console.log('[BotService] ❌ Failed to detect authentication. Proceeding anyway.');
             }
         }
 
@@ -339,12 +342,27 @@ class BotService {
             };
             rec.start(1000);
 
-            // Auto-Leave
+            // Auto-Leave logic (Wait for grace period after start)
+            let joinedAt = Date.now();
             setInterval(() => {
-                const participants = Math.max(document.querySelectorAll('[data-participant-id]').length, document.querySelectorAll('video').length, 1);
-                const isLeft = document.body.innerText.includes('You left') || !document.querySelector('[aria-label*="Leave"]');
-                if (isLeft || participants <= 1) window.onMeetingEnd();
-            }, 5000);
+                const now = Date.now();
+                if (now - joinedAt < 30000) return; // Wait 30s before first check
+
+                const participants = Math.max(
+                    document.querySelectorAll('[data-participant-id]').length,
+                    document.querySelectorAll('video').length,
+                    Array.from(document.querySelectorAll('button')).filter(b => b.innerText?.includes('people') || b.getAttribute('aria-label')?.includes('people')).length // Fallback to people icon logic if possible
+                );
+
+                const leaveBtn = document.querySelector('[aria-label*="Leave call"], [aria-label*="Leave meeting"]');
+                const isLeft = document.body.innerText.includes('You left') || (!leaveBtn && (now - joinedAt > 60000));
+
+                // Only leave if we have been alone for more than 2 minutes
+                if (isLeft || (participants <= 1 && (now - joinedAt > 120000))) {
+                    console.log(`Auto-leaving: participants=${participants} time=${(now - joinedAt) / 1000}s`);
+                    window.onMeetingEnd();
+                }
+            }, 10000);
         });
     }
 
