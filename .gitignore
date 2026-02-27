@@ -7,3 +7,5 @@ recordings/
 *.webm
 *.log
 .DS_Store
+bot_profiles/
+bot-worker/bot_profiles/

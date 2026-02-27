@@ -1,0 +1,9 @@
+node_modules
+bot_profiles
+bot_chrome_data
+google_profile
+recordings
+bot_sessions
+*.zip
+.git
+.env

@@ -17,3 +17,5 @@ services:
       - S3_BUCKET_NAME=${S3_BUCKET_NAME}
       - AWS_BUCKET_NAME=${S3_BUCKET_NAME}
       - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
+      - DOCKER_RUN=true
+      - HEADLESS=true

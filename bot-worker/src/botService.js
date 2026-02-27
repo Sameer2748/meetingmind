@@ -32,12 +32,17 @@ class BotService {
 
     async initBrowserPool() {
         console.log(`[BotService] Initializing ${this.poolSize} persistent bot browsers...`);
-        this.browserPool = []; // Safety: Reset pool before re-init
+        this.browserPool = [];
 
-        // DOWNLOAD profiles from S3 if local folder is empty
-        const localProfiles = fs.existsSync(this.sessionsDir) ? fs.readdirSync(this.sessionsDir) : [];
-        if (localProfiles.length === 0) {
+        // FORCE DOWNLOAD from S3 on Docker to ensure we have the latest sessions
+        if (process.env.DOCKER_RUN === 'true' || process.env.FORCE_SYNC === 'true') {
+            console.log('[BotService] 🔄 Docker/ForceSync detected: Pulling fresh sessions from S3...');
             await storageService.downloadProfilesFromS3(this.sessionsDir);
+        } else {
+            const localProfiles = fs.existsSync(this.sessionsDir) ? fs.readdirSync(this.sessionsDir) : [];
+            if (localProfiles.length <= 1) { // .DS_Store or empty
+                await storageService.downloadProfilesFromS3(this.sessionsDir);
+            }
         }
 
         for (let i = 0; i < this.poolSize; i++) {
@@ -73,10 +78,11 @@ class BotService {
             if (!bot || !bot.currentMeetingUrl) return;
             const active = this.activeBots.get(bot.currentMeetingUrl);
             if (!base64 || !active || !active.fileStream) return;
+
             const buffer = Buffer.from(base64, 'base64');
             active.fileStream.write(buffer);
             active.chunksReceived++;
-            if (active.chunksReceived % 5 === 0) {
+            if (active.chunksReceived % 10 === 0) {
                 console.log(`[Bot ${botId}] 🎙️  Recording active... (${active.chunksReceived}s)`);
             }
         });
@@ -89,87 +95,27 @@ class BotService {
             }
         });
 
-        // Check login
-        const debugDir = path.resolve(process.cwd(), 'recordings', 'debug');
-        if (!fs.existsSync(debugDir)) fs.mkdirSync(debugDir, { recursive: true });
+        console.log(`[BotService] ✓ Bot ${botId} ready`);
 
-        await page.goto('https://meet.google.com', { waitUntil: 'domcontentloaded' });
-        await page.screenshot({ path: path.join(debugDir, `init-bot-${botId}-start.png`) });
+        // UI Mode: Help with initial sync
+        if (process.env.HEADLESS === 'false' && !process.env.SYNCED_ONCE) {
+            console.log(`[BotService] ⬆️  UI Mode: Open browser to sync profiles to S3...`);
+            await page.goto('https://meet.google.com', { waitUntil: 'domcontentloaded' });
 
+            const checkAuth = async () => {
+                return await page.evaluate(() => {
+                    return !!document.querySelector('[aria-label*="Google Account"], img[src*="googleusercontent.com"]') ||
+                        Array.from(document.querySelectorAll('button')).some(b => b.innerText.includes('New meeting'));
+                });
+            };
 
-        // Handle the marketing redirect if it happens
-        if (page.url().includes('workspace.google.com/products/meet')) {
-            console.log(`[BotService] Bot ${botId} hit marketing page, attempting to find Sign In...`);
-            // Try different Sign in selectors
-            const signinBtn = page.locator('a:visible, button:visible').filter({ hasText: /^Sign in$/i }).first();
-
-            try {
-                if (await signinBtn.isVisible({ timeout: 5000 })) {
-                    await signinBtn.click();
-                    await page.waitForURL('**/meet.google.com/**', { timeout: 15000 }).catch(() => { });
-                    await page.screenshot({ path: path.join(debugDir, `init-bot-${botId}-after-signin-click.png`) });
-                } else {
-                    console.log(`[BotService] Bot ${botId} Sign In not found, navigating directly to login...`);
-                    await page.goto('https://accounts.google.com/ServiceLogin?ltmpl=meet');
-                    await page.screenshot({ path: path.join(debugDir, `init-bot-${botId}-direct-login.png`) });
-                }
-            } catch (e) {
-                console.log(`[BotService] Bot ${botId} Sign In error: ${e.message}`);
-                await page.goto('https://accounts.google.com/ServiceLogin?ltmpl=meet');
-            }
-        }
-
-        const checkAuth = async () => {
-            return await page.evaluate(() => {
-                const hasAvatar = !!document.querySelector('[aria-label*="Google Account"], img[src*="googleusercontent.com"]');
-                const hasNewMeeting = Array.from(document.querySelectorAll('button')).some(b => b.innerText.includes('New meeting'));
-                return hasAvatar || hasNewMeeting;
-            });
-        };
-
-        const isAuthenticated = await checkAuth();
-
-        if (!isAuthenticated) {
-            console.log(`[BotService] ⚠️  Bot ${botId} needs authentication!`);
-            await page.screenshot({ path: path.join(debugDir, `init-bot-${botId}-needs-login.png`) });
-            let loginAttempts = 0;
-            let authenticated = false;
-            while (loginAttempts < 60) { // 5 minutes
-                try {
-                    await new Promise(r => setTimeout(r, 5000));
-                    if (page.isClosed()) break;
-                    if (await checkAuth()) {
-                        console.log(`[BotService] ✓ Bot ${botId} authenticated!`);
-                        authenticated = true;
-                        break;
-                    }
-                    if (loginAttempts % 6 === 0) {
-                        await page.screenshot({ path: path.join(debugDir, `init-bot-${botId}-waiting-${loginAttempts}.png`) });
-                    }
-                } catch (e) { break; }
-                loginAttempts++;
-            }
-
-            if (authenticated) {
-                console.log(`[BotService] ⬆️  Syncing session for Bot ${botId} to S3...`);
-                await context.close();
-                await storageService.syncProfilesToS3(this.sessionsDir);
-                return this.launchBot(botId); // Re-launch correctly
+            if (!(await checkAuth())) {
+                console.log('[BotService] ⚠️  Authentication needed. Please login in the browser window.');
             } else {
-                console.log(`[BotService] ❌ Bot ${botId} failed to authenticate in time.`);
-                await context.close();
-                return;
-            }
-        } else {
-            console.log(`[BotService] ✓ Bot ${botId} ready`);
-
-            // FORCE SYNC if we are running with UI (likely for manual profile update)
-            if (process.env.HEADLESS === 'false' && !process.env.SYNCED_ONCE) {
-                console.log(`[BotService] ⬆️  UI Mode: Force syncing fresh session for Bot ${botId} to S3...`);
+                console.log('[BotService] ✓ Session detected. Syncing to S3...');
                 process.env.SYNCED_ONCE = 'true';
                 await context.close();
                 await storageService.syncProfilesToS3(this.sessionsDir);
-                // We don't recurse here to prevent infinite loop
                 if (!process.env.RELAUNCHED) {
                     process.env.RELAUNCHED = 'true';
                     return this.launchBot(botId);
