@@ -103,15 +103,28 @@ class BotService {
             await page.goto('https://meet.google.com', { waitUntil: 'domcontentloaded' });
 
             const checkAuth = async () => {
-                return await page.evaluate(() => {
-                    return !!document.querySelector('[aria-label*="Google Account"], img[src*="googleusercontent.com"]') ||
-                        Array.from(document.querySelectorAll('button')).some(b => b.innerText.includes('New meeting'));
-                });
+                try {
+                    return await page.evaluate(() => {
+                        return !!document.querySelector('[aria-label*="Google Account"], img[src*="googleusercontent.com"]') ||
+                            Array.from(document.querySelectorAll('button')).some(b => b.innerText.includes('New meeting'));
+                    });
+                } catch (e) { return false; }
             };
 
-            if (!(await checkAuth())) {
+            let authenticated = await checkAuth();
+            if (!authenticated) {
                 console.log('[BotService] ⚠️  Authentication needed. Please login in the browser window.');
-            } else {
+                // Stay on page and wait for manual login
+                for (let i = 0; i < 60; i++) {
+                    await new Promise(r => setTimeout(r, 5000));
+                    if (await checkAuth()) {
+                        authenticated = true;
+                        break;
+                    }
+                }
+            }
+
+            if (authenticated) {
                 console.log('[BotService] ✓ Session detected. Syncing to S3...');
                 process.env.SYNCED_ONCE = 'true';
                 await context.close();
@@ -120,6 +133,8 @@ class BotService {
                     process.env.RELAUNCHED = 'true';
                     return this.launchBot(botId);
                 }
+            } else {
+                console.log('[BotService] ❌ Failed to detect authentication. Proceeding anyway.');
             }
         }
 
@@ -186,6 +201,10 @@ class BotService {
                     if (txt.includes("you can't join") || txt.includes('not found')) return { state: 'BLOCKED', url: window.location.href };
                     if (txt.includes('waiting for') || txt.includes('let you in soon')) return { state: 'WAITING_ADMIT', url: window.location.href };
 
+                    // Check for guest name input
+                    const nameInput = document.querySelector('input[placeholder*="Your name"], input[aria-label*="Your name"]');
+                    if (nameInput && !nameInput.value) return { state: 'NAME_NEEDED', url: window.location.href };
+
                     const btns = Array.from(document.querySelectorAll('button, [role="button"]'));
                     const enabledJoin = btns.find(b => {
                         const text = (b.innerText || '').toLowerCase();
@@ -209,6 +228,13 @@ class BotService {
 
                 const { state, debug, url } = pageData;
                 console.log(`[Bot ${botId}] Status: ${state}`);
+
+                if (state === 'NAME_NEEDED') {
+                    console.log(`[Bot ${botId}] Guest mode detected, typing name...`);
+                    await page.fill('input[placeholder*="Your name"], input[aria-label*="Your name"]', botName);
+                    await page.waitForTimeout(1000);
+                    continue;
+                }
 
                 if (state === 'PREPARING') {
                     console.log(`[Bot ${botId}] Debug: ${debug}`);
