@@ -30,24 +30,29 @@ class DeepgramService {
 
             let result = response.data;
             let alternative = result.results.channels[0].alternatives[0];
+            let detectedLang = result.results.channels[0].detected_language || 'en';
 
-            // SMART RETRY: If Deepgram detected 'en' but found 0 words, retry with Hindi
-            // This is common for Hinglish/Indian accents where detection fails but speech is present.
+            // SMART RETRY: If transcript is empty, try forcing Hindi (common for this project)
             if ((!alternative.transcript || alternative.transcript.trim().length === 0) && result.metadata.duration > 3) {
-                console.log(`[DeepgramService] [RETRY] Detected ${result.results.channels[0].detected_language} but transcript is empty. Retrying with Hindi (hi) model...`);
+                console.log(`[DeepgramService] [RETRY] Detected ${detectedLang} but transcript is empty. Retrying with forced Hindi (hi)...`);
                 const retryUrl = 'https://api.deepgram.com/v1/listen?smart_format=true&diarize=true&model=nova-2&punctuate=true&paragraphs=true&filler_words=true&language=hi';
                 const retryRes = await axios.post(retryUrl, audioData, {
                     headers: {
                         'Authorization': `Token ${apiKey}`,
                         'Content-Type': 'application/octet-stream'
                     }
-                });
+                }).catch(() => null);
 
-                if (retryRes.data.results.channels[0].alternatives[0].transcript) {
+                if (retryRes && retryRes.data.results.channels[0].alternatives[0].transcript) {
                     result = retryRes.data;
                     alternative = result.results.channels[0].alternatives[0];
-                    console.log(`[DeepgramService] [SUCCESS] Retry with Hindi worked! (Words: ${alternative.words.length})`);
+                    console.log(`[DeepgramService] [SUCCESS] Retry with Hindi worked!`);
                 }
+            }
+
+            if (!alternative.transcript || alternative.transcript.trim().length === 0) {
+                console.log(`[DeepgramService] Result still empty after retry. Falling back to AssemblyAI...`);
+                return null;
             }
 
             const words = alternative.words || [];

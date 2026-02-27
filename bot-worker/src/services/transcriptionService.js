@@ -55,10 +55,18 @@ class TranscriptionService {
     async waitForCompletion(transcriptBundle) {
         if (!transcriptBundle) return null;
 
-        // 1. Handle Deepgram (Immediate)
+        // 1. Handle Deepgram with fallback to AssemblyAI
         if (transcriptBundle.type === 'deepgram') {
             const result = await deepgramService.transcribe(transcriptBundle.localPath);
-            return result;
+            if (result && result.text && result.text.length > 5) return result;
+
+            // Fallback to AssemblyAI
+            console.log(`[TranscriptionService] Deepgram results poor/empty. Falling back to AssemblyAI for better quality...`);
+            const fallbackBundle = await this.transcribe(null, null, transcriptBundle.localPath);
+            if (fallbackBundle && fallbackBundle.type === 'assemblyai') {
+                return this.waitForCompletion(fallbackBundle);
+            }
+            return result; // Return the poor result if AssemblyAI also not available
         }
 
         // 2. Handle AssemblyAI (Polling)
