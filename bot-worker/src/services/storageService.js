@@ -104,7 +104,17 @@ class StorageService {
             }));
 
             const writer = fs.createWriteStream(zipPath);
+            let downloadedBytes = 0;
+            const totalBytes = parseInt(response.ContentLength || 0);
+
             await new Promise((resolve, reject) => {
+                response.Body.on('data', (chunk) => {
+                    downloadedBytes += chunk.length;
+                    if (downloadedBytes % (5 * 1024 * 1024) < chunk.length) { // Log every 5MB
+                        const mb = (downloadedBytes / (1024 * 1024)).toFixed(1);
+                        console.log(`[StorageService] Download progress: ${mb}MB${totalBytes ? ` / ${(totalBytes / (1024 * 1024)).toFixed(1)}MB` : ''}`);
+                    }
+                });
                 response.Body.pipe(writer);
                 writer.on('finish', resolve);
                 writer.on('error', reject);
