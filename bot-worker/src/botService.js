@@ -90,28 +90,61 @@ class BotService {
         });
 
         // Check login
-        await page.goto('https://meet.google.com', { waitUntil: 'domcontentloaded' });
-        const needsLogin = await page.evaluate(() => {
-            const hasAvatar = !!document.querySelector('[aria-label*="Google Account"], img[src*="googleusercontent.com"]');
-            const hasNewMeeting = Array.from(document.querySelectorAll('button')).some(b => b.innerText.includes('New meeting'));
-            return !hasAvatar && !hasNewMeeting;
-        });
+        const debugDir = path.resolve(process.cwd(), 'recordings', 'debug');
+        if (!fs.existsSync(debugDir)) fs.mkdirSync(debugDir, { recursive: true });
 
-        if (needsLogin) {
+        await page.goto('https://meet.google.com', { waitUntil: 'domcontentloaded' });
+        await page.screenshot({ path: path.join(debugDir, `init-bot-${botId}-start.png`) });
+
+
+        // Handle the marketing redirect if it happens
+        if (page.url().includes('workspace.google.com/products/meet')) {
+            console.log(`[BotService] Bot ${botId} hit marketing page, attempting to find Sign In...`);
+            // Try different Sign in selectors
+            const signinBtn = page.locator('a:visible, button:visible').filter({ hasText: /^Sign in$/i }).first();
+
+            try {
+                if (await signinBtn.isVisible({ timeout: 5000 })) {
+                    await signinBtn.click();
+                    await page.waitForURL('**/meet.google.com/**', { timeout: 15000 }).catch(() => { });
+                    await page.screenshot({ path: path.join(debugDir, `init-bot-${botId}-after-signin-click.png`) });
+                } else {
+                    console.log(`[BotService] Bot ${botId} Sign In not found, navigating directly to login...`);
+                    await page.goto('https://accounts.google.com/ServiceLogin?ltmpl=meet');
+                    await page.screenshot({ path: path.join(debugDir, `init-bot-${botId}-direct-login.png`) });
+                }
+            } catch (e) {
+                console.log(`[BotService] Bot ${botId} Sign In error: ${e.message}`);
+                await page.goto('https://accounts.google.com/ServiceLogin?ltmpl=meet');
+            }
+        }
+
+        const checkAuth = async () => {
+            return await page.evaluate(() => {
+                const hasAvatar = !!document.querySelector('[aria-label*="Google Account"], img[src*="googleusercontent.com"]');
+                const hasNewMeeting = Array.from(document.querySelectorAll('button')).some(b => b.innerText.includes('New meeting'));
+                return hasAvatar || hasNewMeeting;
+            });
+        };
+
+        const isAuthenticated = await checkAuth();
+
+        if (!isAuthenticated) {
             console.log(`[BotService] ⚠️  Bot ${botId} needs authentication!`);
+            await page.screenshot({ path: path.join(debugDir, `init-bot-${botId}-needs-login.png`) });
             let loginAttempts = 0;
             let authenticated = false;
-            while (loginAttempts < 120) {
+            while (loginAttempts < 60) { // 5 minutes
                 try {
                     await new Promise(r => setTimeout(r, 5000));
                     if (page.isClosed()) break;
-                    const stillNeeds = await page.evaluate(() => {
-                        return !document.querySelector('[aria-label*="Google Account"], img[src*="googleusercontent.com"]');
-                    }).catch(() => true);
-                    if (!stillNeeds) {
+                    if (await checkAuth()) {
                         console.log(`[BotService] ✓ Bot ${botId} authenticated!`);
                         authenticated = true;
                         break;
+                    }
+                    if (loginAttempts % 6 === 0) {
+                        await page.screenshot({ path: path.join(debugDir, `init-bot-${botId}-waiting-${loginAttempts}.png`) });
                     }
                 } catch (e) { break; }
                 loginAttempts++;
@@ -122,9 +155,26 @@ class BotService {
                 await context.close();
                 await storageService.syncProfilesToS3(this.sessionsDir);
                 return this.launchBot(botId); // Re-launch correctly
+            } else {
+                console.log(`[BotService] ❌ Bot ${botId} failed to authenticate in time.`);
+                await context.close();
+                return;
             }
         } else {
             console.log(`[BotService] ✓ Bot ${botId} ready`);
+
+            // FORCE SYNC if we are running with UI (likely for manual profile update)
+            if (process.env.HEADLESS === 'false' && !process.env.SYNCED_ONCE) {
+                console.log(`[BotService] ⬆️  UI Mode: Force syncing fresh session for Bot ${botId} to S3...`);
+                process.env.SYNCED_ONCE = 'true';
+                await context.close();
+                await storageService.syncProfilesToS3(this.sessionsDir);
+                // We don't recurse here to prevent infinite loop
+                if (!process.env.RELAUNCHED) {
+                    process.env.RELAUNCHED = 'true';
+                    return this.launchBot(botId);
+                }
+            }
         }
 
         this.browserPool.push({ context, page, inUse: false, id: botId, currentMeetingUrl: null });
@@ -212,8 +262,17 @@ class BotService {
                 });
 
                 const { state, debug, url } = pageData;
-                console.log(`[Bot ${botId}] Status: ${state} | URL: ${url}`);
-                if (debug && state === 'PREPARING') console.log(`[Bot ${botId}] Debug: ${debug}`);
+                console.log(`[Bot ${botId}] Status: ${state}`);
+
+                if (state === 'PREPARING') {
+                    console.log(`[Bot ${botId}] Debug: ${debug}`);
+                    // Take a screenshot after 5 attempts to see why it's stuck
+                    if (attempt === 5) {
+                        const debugPath = path.join(recordingsDir, `debug-stuck-${botId}.png`);
+                        await page.screenshot({ path: debugPath });
+                        console.log(`[Bot ${botId}] 📸 Screenshot saved to see why we are stuck: ${debugPath}`);
+                    }
+                }
 
                 if (state === 'IN_MEETING') break;
                 if (state === 'BLOCKED' || state === 'REDIRECTED') {
