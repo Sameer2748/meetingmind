@@ -6,12 +6,10 @@ const deepgramService = require('./deepgramService');
 class TranscriptionService {
     constructor() { }
 
-    async transcribe(fileUrl, userEmail, localPath = null) {
+    async transcribe(fileUrl, userEmail, localPath = null, skipDeepgram = false) {
         // Priority 1: Deepgram (Fastest & Handles .webm best)
-        if (process.env.DEEPGRAM_API_KEY && localPath && fs.existsSync(localPath)) {
+        if (!skipDeepgram && process.env.DEEPGRAM_API_KEY && localPath && fs.existsSync(localPath)) {
             console.log(`[TranscriptionService] Using DEEPGRAM for high-velocity transcription...`);
-            // We return a special object that indicates we use Deepgram
-            // Since Deepgram is "one-shot", we can actually do it here or skip the polling phase
             return { type: 'deepgram', localPath };
         }
 
@@ -58,15 +56,15 @@ class TranscriptionService {
         // 1. Handle Deepgram with fallback to AssemblyAI
         if (transcriptBundle.type === 'deepgram') {
             const result = await deepgramService.transcribe(transcriptBundle.localPath);
-            if (result && result.text && result.text.length > 5) return result;
+            if (result && result.text && result.text.length > 50) return result; // Higher threshold for quality
 
             // Fallback to AssemblyAI
             console.log(`[TranscriptionService] Deepgram results poor/empty. Falling back to AssemblyAI for better quality...`);
-            const fallbackBundle = await this.transcribe(null, null, transcriptBundle.localPath);
+            const fallbackBundle = await this.transcribe(null, null, transcriptBundle.localPath, true);
             if (fallbackBundle && fallbackBundle.type === 'assemblyai') {
                 return this.waitForCompletion(fallbackBundle);
             }
-            return result; // Return the poor result if AssemblyAI also not available
+            return result;
         }
 
         // 2. Handle AssemblyAI (Polling)

@@ -62,7 +62,14 @@ const subscriber = new IORedis(redisOptions, {
                 console.error(`[Bot-Worker] [JOB ${job.id}] Failed: ${err.message}`);
                 throw err;
             }
-        }, { connection, concurrency: 2 });
+        }, {
+            connection,
+            concurrency: 2,
+            lockDuration: 30000,          // Reduce frequency of lock renewals
+            stalledInterval: 30000,       // Reduce frequency of stalled job checks
+            maxStalledCount: 1,           // Don't retry stalled jobs too many times
+            drainDelay: 5                 // Add delay when queue is empty to save requests
+        });
 
         worker.on('completed', job => {
             console.log(`[Bot-Worker] [JOB ${job.id}] ✓ Completed`);
