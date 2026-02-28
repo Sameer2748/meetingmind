@@ -8,6 +8,10 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 export const metadata: Metadata = {
   title: "MeetingMind AI | Smart Meeting Intelligence",
   description: "Advanced AI-powered meeting recording and transcription platform. Capture every insight automatically.",
+  icons: {
+    icon: "/favicon.ico",
+    apple: "/apple-touch-icon.png",
+  },
 };
 
 export default function RootLayout({
