@@ -83,16 +83,15 @@ class BotService {
         console.log(`[BotService] Initializing ${this.poolSize} persistent bot browsers...`);
         this.browserPool = [];
 
-        // FORCE DOWNLOAD from S3 on a server (HEADLESS mode) or if explicitly requested
-        if (process.env.HEADLESS === 'true' || process.env.SERVER_MODE === 'true' || process.env.DOCKER_RUN === 'true' || process.env.FORCE_SYNC === 'true') {
-            console.log('[BotService] 🔄 Server Mode Detected: Pulling fresh authenticated sessions from S3...');
+        const localProfiles = fs.existsSync(this.sessionsDir) ? fs.readdirSync(this.sessionsDir).filter(f => !f.startsWith('.')) : [];
+        const hasProfiles = localProfiles.length > 0;
+
+        // Pull from S3 if missing OR if explicitly forced (like a fresh cookie sync)
+        if (process.env.FORCE_SYNC === 'true' || !hasProfiles) {
+            console.log('[BotService] 🔄 Syncing profiles from S3...');
             await storageService.downloadProfilesFromS3(this.sessionsDir);
         } else {
-            const localProfiles = fs.existsSync(this.sessionsDir) ? fs.readdirSync(this.sessionsDir).filter(f => !f.startsWith('.')) : [];
-            // If local directory is empty (no bots), download them
-            if (localProfiles.length === 0) {
-                await storageService.downloadProfilesFromS3(this.sessionsDir);
-            }
+            console.log(`[BotService] ✓ Using ${localProfiles.length} existing local bot profiles.`);
         }
 
         for (let i = 0; i < this.poolSize; i++) {
