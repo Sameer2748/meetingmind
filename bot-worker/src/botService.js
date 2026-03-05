@@ -83,13 +83,14 @@ class BotService {
         console.log(`[BotService] Initializing ${this.poolSize} persistent bot browsers...`);
         this.browserPool = [];
 
-        // FORCE DOWNLOAD from S3 on Docker to ensure we have the latest sessions
-        if (process.env.DOCKER_RUN === 'true' || process.env.FORCE_SYNC === 'true') {
-            console.log('[BotService] 🔄 Docker/ForceSync detected: Pulling fresh sessions from S3...');
+        // FORCE DOWNLOAD from S3 on a server (HEADLESS mode) or if explicitly requested
+        if (process.env.HEADLESS === 'true' || process.env.DOCKER_RUN === 'true' || process.env.FORCE_SYNC === 'true') {
+            console.log('[BotService] 🔄 Server Mode Detected: Pulling fresh authenticated sessions from S3...');
             await storageService.downloadProfilesFromS3(this.sessionsDir);
         } else {
-            const localProfiles = fs.existsSync(this.sessionsDir) ? fs.readdirSync(this.sessionsDir) : [];
-            if (localProfiles.length <= 1) { // .DS_Store or empty
+            const localProfiles = fs.existsSync(this.sessionsDir) ? fs.readdirSync(this.sessionsDir).filter(f => !f.startsWith('.')) : [];
+            // If local directory is empty (no bots), download them
+            if (localProfiles.length === 0) {
                 await storageService.downloadProfilesFromS3(this.sessionsDir);
             }
         }
