@@ -21,10 +21,16 @@ class DeepgramService {
 
             let transcriptUrl = 'https://api.deepgram.com/v1/listen?smart_format=true&diarize=true&model=nova-2&punctuate=true&paragraphs=true&filler_words=true&detect_language=true';
 
+            // Detect content type: combined video+audio WebM needs 'video/webm' so Deepgram
+            // knows to extract the audio track. Audio-only WebM uses 'audio/webm'.
+            const contentType = localPath.endsWith('.webm')
+                ? (audioData.length > 500_000 ? 'video/webm' : 'audio/webm')
+                : 'application/octet-stream';
+
             let response = await axios.post(transcriptUrl, audioData, {
                 headers: {
                     'Authorization': `Token ${apiKey}`,
-                    'Content-Type': 'application/octet-stream'
+                    'Content-Type': contentType,
                 }
             });
 

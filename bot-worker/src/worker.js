@@ -24,6 +24,14 @@ const subscriber = new IORedis(redisOptions, {
     maxRetriesPerRequest: null
 });
 
+// Prevent ioredis "Unhandled error event" crashes (e.g. ECONNRESET).
+connection.on('error', (err) => {
+    console.error('[Bot-Worker] Redis connection error:', err.message);
+});
+subscriber.on('error', (err) => {
+    console.error('[Bot-Worker] Redis subscriber error:', err.message);
+});
+
 // Initialize browser pool and start worker
 (async () => {
     console.log('[Bot-Worker] Initializing browser pool...');

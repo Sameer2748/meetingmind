@@ -7,6 +7,8 @@ const transcriptionService = require('./services/transcriptionService');
 const dbService = require('./services/dbService');
 const mm = require('music-metadata');
 const IORedis = require('ioredis');
+const { spawn } = require('child_process');
+const ffmpegPath = require('ffmpeg-static');
 
 const redisOptions = process.env.REDIS_URL || {
     host: process.env.REDIS_HOST || 'localhost',
@@ -21,6 +23,11 @@ const redis = new IORedis(redisOptions, {
     ...tlsConfig
 });
 
+// Prevent ioredis unhandled error crashes (e.g. ECONNRESET)
+redis.on('error', (err) => {
+    console.error('[BotService] Redis error:', err.message);
+});
+
 class BotService {
     constructor() {
         this.activeBots = new Map();
@@ -28,6 +35,48 @@ class BotService {
         this.poolSize = 2;
         this.sessionsDir = path.resolve(process.cwd(), 'bot_profiles');
         if (!fs.existsSync(this.sessionsDir)) fs.mkdirSync(this.sessionsDir, { recursive: true });
+    }
+
+    isVideoRecordingEnabled() {
+        return process.env.RECORD_VIDEO === 'true';
+    }
+
+    isMergeVideoAudioEnabled() {
+        return process.env.MERGE_VIDEO_AUDIO === 'true';
+    }
+
+    shouldShowOverlay() {
+        // If Playwright video recording is enabled, an overlay would cover the entire capture.
+        return process.env.SHOW_BOT_OVERLAY !== 'false' && !this.isVideoRecordingEnabled();
+    }
+
+    async registerPageBindings(page, botId) {
+        if (page.__mmBindingsRegistered) return;
+
+        // Register functions ONCE per page
+        await page.exposeFunction('sendAudioChunk', (base64) => {
+            const bot = this.browserPool.find(b => b.id === botId);
+            if (!bot || !bot.currentMeetingUrl) return;
+            const active = this.activeBots.get(bot.currentMeetingUrl);
+            if (!base64 || !active || !active.fileStream) return;
+
+            const buffer = Buffer.from(base64, 'base64');
+            active.fileStream.write(buffer);
+            active.chunksReceived++;
+            if (active.chunksReceived % 10 === 0) {
+                console.log(`[Bot ${botId}] 🎙️  Recording active... (${active.chunksReceived}s)`);
+            }
+        });
+
+        await page.exposeFunction('onMeetingEnd', async () => {
+            const bot = this.browserPool.find(b => b.id === botId);
+            if (bot && bot.currentMeetingUrl) {
+                console.log(`[Bot ${botId}] Signal: Meeting Ended`);
+                await this.stopMeeting(bot.currentMeetingUrl);
+            }
+        });
+
+        page.__mmBindingsRegistered = true;
     }
 
     async initBrowserPool() {
@@ -53,47 +102,56 @@ class BotService {
 
     async launchBot(botId) {
         const profileDir = path.join(this.sessionsDir, `bot-${botId}`);
-        const context = await chromium.launchPersistentContext(profileDir, {
+        const launchArgs = [
+            '--use-fake-ui-for-media-stream',  // auto-grant permission dialogs (no green fake camera)
+            '--disable-blink-features=AutomationControlled',
+            '--no-sandbox',
+            '--disable-infobars',
+            '--enable-usermedia-screen-capturing',    // allow getDisplayMedia without dialog
+            '--auto-select-desktop-capture-source=Tab', // auto-pick current tab, no picker UI
+        ];
+
+        // Always mute the system audio — the in-browser canvas+audio recorder captures
+        // meeting sound via AudioContext directly, so we don't need the OS to play it.
+        launchArgs.push('--mute-audio');
+
+        const launchOptions = {
             headless: process.env.HEADLESS === 'true',
-            args: [
-                '--use-fake-ui-for-media-stream',
-                '--use-fake-device-for-media-stream',
-                '--disable-blink-features=AutomationControlled',
-                '--no-sandbox',
-                '--disable-infobars',
-                '--mute-audio',
-            ],
+            args: launchArgs,
             viewport: { width: 1280, height: 720 },
             permissions: ['microphone', 'camera'],
             userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
             bypassCSP: true,
             ignoreHTTPSErrors: true
-        });
+        };
+
+        let context;
+        try {
+            context = await chromium.launchPersistentContext(profileDir, launchOptions);
+        } catch (e) {
+            const isHeaded = process.env.HEADLESS !== 'true';
+            if (!isHeaded) throw e;
+
+            // Headed launches are more sensitive to corrupted/old profile state.
+            // Preserve the existing profile for debugging, then retry with a fresh one
+            // so the UI can open and you can re-auth/sync.
+            const backupDir = `${profileDir}-backup-${Date.now()}`;
+            try {
+                if (fs.existsSync(profileDir)) {
+                    fs.renameSync(profileDir, backupDir);
+                    console.log(`[BotService] ⚠️  Bot ${botId} profile crashed in headed mode. Backed up to: ${backupDir}`);
+                }
+                fs.mkdirSync(profileDir, { recursive: true });
+            } catch (moveErr) {
+                console.error(`[BotService] Failed to backup/recreate profile dir for Bot ${botId}:`, moveErr.message);
+            }
+
+            context = await chromium.launchPersistentContext(profileDir, launchOptions);
+        }
 
         const page = context.pages()[0] || await context.newPage();
 
-        // Register functions ONCE per page
-        await page.exposeFunction('sendAudioChunk', (base64) => {
-            const bot = this.browserPool.find(b => b.id === botId);
-            if (!bot || !bot.currentMeetingUrl) return;
-            const active = this.activeBots.get(bot.currentMeetingUrl);
-            if (!base64 || !active || !active.fileStream) return;
-
-            const buffer = Buffer.from(base64, 'base64');
-            active.fileStream.write(buffer);
-            active.chunksReceived++;
-            if (active.chunksReceived % 10 === 0) {
-                console.log(`[Bot ${botId}] 🎙️  Recording active... (${active.chunksReceived}s)`);
-            }
-        });
-
-        await page.exposeFunction('onMeetingEnd', async () => {
-            const bot = this.browserPool.find(b => b.id === botId);
-            if (bot && bot.currentMeetingUrl) {
-                console.log(`[Bot ${botId}] Signal: Meeting Ended`);
-                await this.stopMeeting(bot.currentMeetingUrl);
-            }
-        });
+        await this.registerPageBindings(page, botId);
 
         console.log(`[BotService] ✓ Bot ${botId} ready`);
 
@@ -141,7 +199,7 @@ class BotService {
             }
         }
 
-        this.browserPool.push({ context, page, inUse: false, id: botId, currentMeetingUrl: null });
+        this.browserPool.push({ context, page, inUse: false, id: botId, currentMeetingUrl: null, videoStartTime: Date.now() });
     }
 
     getAvailableBot() {
@@ -164,7 +222,8 @@ class BotService {
 
         bot.inUse = true;
         bot.currentMeetingUrl = meetingUrl;
-        const { page, id: botId } = bot;
+        const { id: botId } = bot;
+        let { page } = bot;
 
         try {
             const recordingId = Date.now();
@@ -174,7 +233,7 @@ class BotService {
             const fileStream = fs.createWriteStream(recordingPath);
 
             this.activeBots.set(meetingUrl, {
-                botId, page, fileStream, recordingPath, userEmail,
+                botId, page, fileStream, recordingPath, userEmail, recordingId, recordingsDir,
                 status: 'joining', stopSignal: false, chunksReceived: 0
             });
 
@@ -290,76 +349,121 @@ class BotService {
     }
 
     async handleRecording(page, meetingUrl, botId) {
-        console.log(`[Bot ${botId}] ✓ Recording started`);
+        console.log(`[Bot ${botId}] ✓ Combined video+audio recording started`);
         this.updateBotStatus(meetingUrl, 'recording');
         const active = this.activeBots.get(meetingUrl);
         if (active) active.startTime = Date.now();
 
-        await page.evaluate(() => {
-            // UI Overlay
-            const ui = document.createElement('div');
-            Object.assign(ui.style, { position: 'fixed', top: '0', left: '0', width: '100vw', height: '100vh', background: '#f1efd8', zIndex: '99999', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'sans-serif', pointerEvents: 'none' });
-
-            const card = document.createElement('div');
-            card.style.textAlign = 'center';
-            const title = document.createElement('h1');
-            title.style.cssText = 'font-size:36px;font-weight:900;color:#01114f;';
-            title.textContent = 'MeetingMind AI Notetaker';
-            const subtitle = document.createElement('p');
-            subtitle.style.color = '#01114f';
-            subtitle.textContent = 'Capturing meeting audio...';
-
-            card.appendChild(title);
-            card.appendChild(subtitle);
-            ui.appendChild(card);
-            document.body.appendChild(ui);
-
-            // Audio Logic
-            const ctx = new (window.AudioContext || window.webkitAudioContext)();
-            const dest = ctx.createMediaStreamDestination();
-            const link = () => {
-                if (ctx.state === 'suspended') ctx.resume();
+        await page.evaluate(async () => {
+            // ── 1. AUDIO: mix all meeting participants' audio via AudioContext ───────────
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const audioDest = audioCtx.createMediaStreamDestination();
+            const linkAudio = () => {
+                if (audioCtx.state === 'suspended') audioCtx.resume();
                 document.querySelectorAll('audio, video').forEach(el => {
                     if (el._linked) return;
                     try {
                         const stream = el.srcObject || (el.captureStream ? el.captureStream() : null);
                         if (stream && stream.getAudioTracks().length > 0) {
-                            ctx.createMediaStreamSource(stream).connect(dest);
+                            audioCtx.createMediaStreamSource(stream).connect(audioDest);
                             el._linked = true;
                         }
                     } catch (e) { }
                 });
             };
-            setInterval(link, 1000);
+            setInterval(linkAudio, 1000);
+            linkAudio();
 
-            const rec = new MediaRecorder(dest.stream, { mimeType: 'audio/webm;codecs=opus' });
+            // ── 2. VIDEO: capture the full browser tab (complete Google Meet UI) ────────
+            let videoTrack = null;
+            try {
+                // getDisplayMedia captures the full rendered tab — full UI, all participants.
+                // Chrome flags --enable-usermedia-screen-capturing +
+                // --auto-select-desktop-capture-source=Tab auto-approve this without a dialog.
+                const displayStream = await navigator.mediaDevices.getDisplayMedia({
+                    video: { frameRate: 15, displaySurface: 'browser' },
+                    audio: false, // audio comes from AudioContext above (more reliable)
+                });
+                videoTrack = displayStream.getVideoTracks()[0];
+                console.log('[MeetingMind] ✅ Tab screen capture started');
+            } catch (e) {
+                console.warn('[MeetingMind] getDisplayMedia failed, falling back to canvas grid:', e.message);
+            }
+
+            // ── 2b. FALLBACK: canvas grid of all participant video elements ──────────
+            if (!videoTrack) {
+                const canvas = document.createElement('canvas');
+                canvas.width = 1280; canvas.height = 720;
+                const ctx2d = canvas.getContext('2d');
+                ctx2d.fillStyle = '#202124';
+                ctx2d.fillRect(0, 0, 1280, 720);
+
+                const drawFrame = () => {
+                    const vids = Array.from(document.querySelectorAll('video'))
+                        .filter(v => v.readyState >= 2 && v.videoWidth > 0 && !v.paused);
+                    ctx2d.fillStyle = '#202124';
+                    ctx2d.fillRect(0, 0, 1280, 720);
+                    if (vids.length === 0) return;
+                    const cols = vids.length === 1 ? 1 : vids.length <= 4 ? 2 : 3;
+                    const rows = Math.ceil(vids.length / cols);
+                    const cellW = Math.floor(1280 / cols), cellH = Math.floor(720 / rows), gap = 4;
+                    vids.forEach((v, i) => {
+                        const col = i % cols, row = Math.floor(i / cols);
+                        const x = col * cellW + gap / 2, y = row * cellH + gap / 2;
+                        const w = cellW - gap, h = cellH - gap;
+                        const vA = v.videoWidth / v.videoHeight, cA = w / h;
+                        let dx = x, dy = y, dw = w, dh = h;
+                        if (vA > cA) { dh = w / vA; dy = y + (h - dh) / 2; }
+                        else { dw = h * vA; dx = x + (w - dw) / 2; }
+                        ctx2d.fillStyle = '#3c4043';
+                        ctx2d.fillRect(x, y, w, h);
+                        ctx2d.drawImage(v, dx, dy, dw, dh);
+                    });
+                };
+                drawFrame();
+                setInterval(drawFrame, Math.floor(1000 / 15));
+                videoTrack = canvas.captureStream(15).getVideoTracks()[0];
+            }
+
+            // ── 3. COMBINE: one MediaRecorder = full screen video + meeting audio ────
+            const combined = new MediaStream([
+                videoTrack,
+                ...audioDest.stream.getAudioTracks(),
+            ]);
+
+            const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
+                ? 'video/webm;codecs=vp8,opus' : 'video/webm';
+
+            const rec = new MediaRecorder(combined, {
+                mimeType,
+                videoBitsPerSecond: 400_000,
+                audioBitsPerSecond: 64_000,
+            });
+
             rec.ondataavailable = e => {
                 if (e.data.size > 0) {
                     const reader = new FileReader();
-                    reader.onload = () => window.sendAudioChunk(reader.result.split(',')[1]);
+                    reader.onload = () => window.sendAudioChunk(reader.result.split(';base64,')[1]);
                     reader.readAsDataURL(e.data);
                 }
             };
-            rec.start(1000);
+            setTimeout(() => rec.start(2000), 300);
 
-            // Auto-Leave logic (Wait for grace period after start)
+            // ── 4. AUTO-LEAVE ─────────────────────────────────────────────
             let joinedAt = Date.now();
             setInterval(() => {
                 const now = Date.now();
-                if (now - joinedAt < 30000) return; // Wait 30s before first check
-
+                if (now - joinedAt < 30000) return;
                 const participants = Math.max(
                     document.querySelectorAll('[data-participant-id]').length,
                     document.querySelectorAll('video').length,
-                    Array.from(document.querySelectorAll('button')).filter(b => b.innerText?.includes('people') || b.getAttribute('aria-label')?.includes('people')).length // Fallback to people icon logic if possible
+                    Array.from(document.querySelectorAll('button'))
+                        .filter(b => b.innerText?.includes('people') || b.getAttribute('aria-label')?.includes('people')).length
                 );
-
                 const leaveBtn = document.querySelector('[aria-label*="Leave call"], [aria-label*="Leave meeting"]');
                 const isLeft = document.body.innerText.includes('You left') || (!leaveBtn && (now - joinedAt > 60000));
-
-                // Only leave if we have been alone for more than 2 minutes
                 if (isLeft || (participants <= 1 && (now - joinedAt > 120000))) {
-                    console.log(`Auto-leaving: participants=${participants} time=${(now - joinedAt) / 1000}s`);
+                    console.log(`Auto-leaving: participants=${participants}`);
                     window.onMeetingEnd();
                 }
             }, 10000);
@@ -369,33 +473,50 @@ class BotService {
     async stopMeeting(meetingUrl) {
         const active = this.activeBots.get(meetingUrl);
         if (!active) return;
-        const { botId, fileStream, recordingPath, userEmail } = active;
+        const { botId, fileStream, recordingPath, userEmail, recordingsDir } = active;
         console.log(`[Bot ${botId}] Stopping and saving...`);
         this.updateBotStatus(meetingUrl, 'saving');
 
+        const waitForFileStreamToFinish = async () => {
+            if (!fileStream) return;
+            const finished = new Promise((resolve) => {
+                fileStream.once('finish', resolve);
+                fileStream.once('close', resolve);
+                fileStream.once('error', resolve);
+            });
+            await Promise.race([finished, new Promise(r => setTimeout(r, 5000))]);
+        };
+
         if (fileStream) {
-            fileStream.end();
+            try { fileStream.end(); } catch (e) { }
             if (active.chunksReceived > 0) {
                 (async () => {
                     try {
-                        let duration = active.startTime ? Math.round((Date.now() - active.startTime) / 1000) : 0;
+                        await waitForFileStreamToFinish();
+
+                        const duration = active.startTime ? Math.round((Date.now() - active.startTime) / 1000) : 0;
                         const id = await dbService.saveRecording({ meeting_url: meetingUrl, user_email: userEmail, file_path: recordingPath, status: 'local', duration });
+
                         const cloudUrl = await storageService.uploadRecording(recordingPath, userEmail);
                         await dbService.saveRecording({ id, s3_url: cloudUrl, status: 'uploaded' });
+
                         const bundle = await transcriptionService.transcribe(cloudUrl, userEmail, recordingPath);
                         if (bundle && id) {
                             await dbService.updateTranscriptId(id, bundle.id || 'sync');
-                            const res = await transcriptionService.waitForCompletion(bundle);
-                            if (res) {
-                                const s3Url = await storageService.uploadText(res.formatted, `transcript-${id}.txt`, userEmail);
-                                await dbService.saveTranscriptResult(id, res.formatted, s3Url, res.words || null);
+                            const tr = await transcriptionService.waitForCompletion(bundle);
+                            if (tr) {
+                                const s3Url = await storageService.uploadText(tr.formatted, `transcript-${id}.txt`, userEmail);
+                                await dbService.saveTranscriptResult(id, tr.formatted, s3Url, tr.words || null);
                             }
                         }
 
-                        // CLEANUP: Delete local recording file after successful upload/processing
-                        if (fs.existsSync(recordingPath)) {
-                            fs.unlinkSync(recordingPath);
-                            console.log(`[Bot ${botId}] Local file deleted to save space: ${path.basename(recordingPath)}`);
+                        if (process.env.DEBUG_KEEP_LOCAL !== 'true') {
+                            if (fs.existsSync(recordingPath)) {
+                                fs.unlinkSync(recordingPath);
+                                console.log(`[Bot ${botId}] Local file deleted: ${path.basename(recordingPath)}`);
+                            }
+                        } else {
+                            console.log(`[Bot ${botId}] DEBUG_KEEP_LOCAL=true — file kept at: ${recordingPath}`);
                         }
                     } catch (e) {
                         console.error(`[Bot ${botId}] Save/Cleanup Error:`, e.message);

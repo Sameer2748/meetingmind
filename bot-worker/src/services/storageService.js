@@ -22,13 +22,14 @@ class StorageService {
         const s3Key = `${userEmail}/${fileName}`;
         console.log(`[StorageService] Uploading ${fileName} to S3...`);
         try {
+            const contentType = filePath.endsWith('.webm') ? 'video/webm' : 'application/octet-stream';
             const upload = new Upload({
                 client: this.client,
                 params: {
                     Bucket: this.bucketName,
                     Key: s3Key,
                     Body: fs.createReadStream(filePath),
-                    ContentType: "audio/webm",
+                    ContentType: contentType,
                 },
             });
             await upload.done();
@@ -61,11 +62,20 @@ class StorageService {
         const output = fs.createWriteStream(zipPath);
         const archive = archiver('zip', { zlib: { level: 9 } });
 
-        console.log('[StorageService] Zipping profiles for S3 backup...');
+        // Only sync essential auth data — skip browser cache dirs that bloat the zip.
+        // These dirs are regenerated automatically by Chrome on next launch.
+        const SKIP_DIRS = new Set([
+            'Cache', 'Code Cache', 'GPUCache', 'DawnCache',
+            'blob_storage', 'Network', 'databases',
+            'GrShaderCache', 'ShaderCache', 'VideoDecodeStats',
+        ]);
+
+        console.log('[StorageService] Zipping profiles for S3 backup (cache excluded)...');
 
         return new Promise((resolve, reject) => {
             output.on('close', async () => {
-                console.log(`[StorageService] Zip complete (${archive.pointer()} bytes)`);
+                const mb = (archive.pointer() / (1024 * 1024)).toFixed(1);
+                console.log(`[StorageService] Zip complete (${mb} MB)`);
                 try {
                     const upload = new Upload({
                         client: this.client,
@@ -76,7 +86,7 @@ class StorageService {
                         },
                     });
                     await upload.done();
-                    console.log('[StorageService] ✓ Profiles synced to S3');
+                    console.log('[StorageService] ✓ Profiles synced to S3 (replaced previous)');
                     fs.unlinkSync(zipPath); // Delete local zip
                     resolve(true);
                 } catch (e) {
@@ -87,7 +97,23 @@ class StorageService {
 
             archive.on('error', (err) => reject(err));
             archive.pipe(output);
-            archive.directory(profilesDir, false);
+
+            // Walk the profile dir manually to skip heavy cache folders
+            const addDir = (srcDir, destPrefix) => {
+                if (!fs.existsSync(srcDir)) return;
+                for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
+                    if (SKIP_DIRS.has(entry.name)) continue; // skip cache
+                    const srcPath = path.join(srcDir, entry.name);
+                    const destPath = destPrefix ? `${destPrefix}/${entry.name}` : entry.name;
+                    if (entry.isDirectory()) {
+                        addDir(srcPath, destPath);
+                    } else {
+                        archive.file(srcPath, { name: destPath });
+                    }
+                }
+            };
+            addDir(profilesDir, '');
+
             archive.finalize();
         });
     }
