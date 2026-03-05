@@ -87,14 +87,16 @@ class BotService {
         const hasProfiles = localProfiles.length > 0;
 
         // AWS SERVER: ALWAYS pull fresh profiles from S3 to stay in sink with the latest "Golden Sync"
-        // LOCAL MAC: ONLY pull if missing, so you can login and push new updates to S3.
-        const shouldPull = process.env.SERVER_MODE === 'true' || process.env.FORCE_SYNC === 'true' || !hasProfiles;
+        // LOCAL MAC: DO NOT pull automatically (so you can start fresh by deleting the folder). 
+        // Use FORCE_SYNC=true if you want to pull from S3 locally.
+        const shouldPull = process.env.SERVER_MODE === 'true' || process.env.FORCE_SYNC === 'true';
 
         if (shouldPull) {
             console.log('[BotService] 🔄 Syncing profiles from S3...');
             await storageService.downloadProfilesFromS3(this.sessionsDir);
         } else {
-            console.log(`[BotService] ✓ Using ${localProfiles.length} existing local bot profiles.`);
+            const profiles = localProfiles.length;
+            console.log(profiles > 0 ? `[BotService] ✓ Using ${profiles} existing local profiles.` : '[BotService] ℹ️ No local profiles found. Starting fresh (UI mode login will trigger S3 sync).');
         }
 
         for (let i = 0; i < this.poolSize; i++) {
@@ -168,21 +170,37 @@ class BotService {
                 const checkAuth = async () => {
                     try {
                         return await page.evaluate(() => {
-                            return !!document.querySelector('[aria-label*="Google Account"], img[src*="googleusercontent.com"]') ||
-                                Array.from(document.querySelectorAll('button')).some(b => b.innerText.includes('New meeting'));
+                            // Look for signs of being logged in:
+                            // 1. Google Account circle/avatar
+                            // 2. "Logged in as" tooltips
+                            // 3. The presence of the "Start a meeting" button which only appears when AUTHENTICATED
+                            const hasAvatar = !!document.querySelector('[aria-label*="Google Account"], img[src*="googleusercontent.com"]');
+                            const hasLogout = Array.from(document.querySelectorAll('a, button')).some(el =>
+                                (el.innerText || '').includes('Sign out') || (el.getAttribute('aria-label') || '').includes('Sign out')
+                            );
+                            const hasMeetingControls = !!document.querySelector('[data-is-muted]'); // Meeting control bar usually indicates inside or ready
+
+                            return hasAvatar || hasLogout;
                         });
                     } catch (e) { return false; }
                 };
 
                 let authenticated = await checkAuth();
                 if (!authenticated) {
-                    console.log('[BotService] ⚠️  Authentication needed. Please login in the browser window.');
-                    // Wait for manual login (up to 5 mins)
-                    for (let i = 0; i < 60; i++) {
+                    console.log('[BotService] ⚠️  Authentication NOT detected. Please log in to your Google Account now...');
+                    console.log('[BotService] ℹ️  The bot will wait for you to finish signing in before syncing to S3.');
+
+                    // Wait for manual login (up to 10 mins)
+                    for (let i = 0; i < 120; i++) {
                         await new Promise(r => setTimeout(r, 5000));
                         if (await checkAuth()) {
-                            authenticated = true;
-                            break;
+                            // Double check after 2 seconds to ensure page finished loading session
+                            await new Promise(r => setTimeout(r, 2000));
+                            if (await checkAuth()) {
+                                authenticated = true;
+                                console.log('[BotService] ✨ Authenticated session detected!');
+                                break;
+                            }
                         }
                     }
                 }
