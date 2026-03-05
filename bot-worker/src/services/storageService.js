@@ -147,7 +147,10 @@ class StorageService {
             });
 
             console.log('[StorageService] Extracting profiles...');
-            if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+            if (fs.existsSync(targetDir)) {
+                fs.rmSync(targetDir, { recursive: true, force: true });
+            }
+            fs.mkdirSync(targetDir, { recursive: true });
             await extract(zipPath, { dir: targetDir, overwrite: true });
 
             fs.unlinkSync(zipPath);
