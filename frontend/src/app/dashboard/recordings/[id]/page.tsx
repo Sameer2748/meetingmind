@@ -466,13 +466,9 @@ export default function RecordingDetails() {
     }, [seekToSeconds]);
 
     // Build a word-level timestamp lookup from Deepgram's word data
-    // Maps each word in the transcript to its exact start time in seconds
     const wordTimestampMap = useMemo(() => {
         const words = recording?.transcript_words;
         if (!words || !Array.isArray(words) || words.length === 0) return null;
-
-        // Build a map: for each word occurrence, track its position in the full text
-        // We'll use this to find the timestamp of a specific character offset
         return words as Array<{ word: string; start: number; end: number; speaker: number; confidence: number }>;
     }, [recording?.transcript_words]);
 
@@ -480,27 +476,18 @@ export default function RecordingDetails() {
     const findWordTimestamp = useCallback((segmentText: string, charOffset: number, segmentTimeStr: string): number => {
         if (!wordTimestampMap) return timeToSeconds(segmentTimeStr);
 
-        // Get the word at the charOffset position
         const beforeOffset = segmentText.substring(0, charOffset);
         const wordsBefore = beforeOffset.split(/\s+/).filter(w => w.length > 0).length;
-
-        // Find this segment's words in the word map by matching the segment start time
         const segmentStartSec = timeToSeconds(segmentTimeStr);
-
-        // Find the first word in wordTimestampMap that matches this segment's start time (within 1s tolerance)
         let segStartIdx = wordTimestampMap.findIndex(w => Math.abs(w.start - segmentStartSec) < 1.5);
-        if (segStartIdx === -1) {
-            // Fallback: try to find by matching text content
-            segStartIdx = 0;
-        }
+        if (segStartIdx === -1) segStartIdx = 0;
 
-        // Navigate to the word at wordsBefore offset from segment start
         const targetIdx = segStartIdx + wordsBefore;
         if (targetIdx < wordTimestampMap.length) {
             return wordTimestampMap[targetIdx].start;
         }
 
-        return segmentStartSec; // fallback to segment start
+        return segmentStartSec;
     }, [wordTimestampMap]);
 
     const parsedTranscript = useMemo(() => {
@@ -513,7 +500,6 @@ export default function RecordingDetails() {
         const result: Array<Array<{ word: string; start: number; end: number }>> = [];
         let globalIdx = 0;
         parsedTranscript.forEach((utterance) => {
-            // Healer: ensure spaces after punctuation if they were missing in the source
             const healedText = utterance.text.replace(/([,.!?;:])([A-Za-z])/g, '$1 $2');
             const words = healedText.trim().split(/\s+/).filter(w => w.length > 0);
             const mapped = words.map((word) => {
@@ -574,8 +560,8 @@ export default function RecordingDetails() {
         <>
             <SidebarProvider className="flex w-full min-h-screen">
                 <AppSidebar user={user} />
-                <SidebarInset className="bg-background flex-1 min-w-0">
-                    <header className="sticky top-0 z-[200] flex h-16 shrink-0 items-center gap-4 border-b border-white/5 bg-black/50 backdrop-blur-xl px-6">
+                <SidebarInset className="bg-background flex-1 min-w-0 flex flex-col overflow-y-auto h-screen">
+                    <header className="sticky top-0 z-[200] flex h-16 shrink-0 items-center gap-4 border-b border-white/5 bg-black/50 backdrop-blur-xl px-6" style={{ position: "sticky", top: 0 }}>
                         <button
                             onClick={() => router.back()}
                             className="p-2 hover:bg-white/10 rounded-full transition-colors text-white/70 hover:text-white"
@@ -627,127 +613,129 @@ export default function RecordingDetails() {
                         </div>
                     </header>
 
-                    <div className="w-full bg-[#050505] dark:bg-[#0c0c0e] py-12 lg:py-20 border-b border-white/5 relative z-10">
+                    <div className="w-full bg-[#050505] dark:bg-[#0c0c0e] py-12 lg:py-20 border-b border-white/5">
                         <div className="max-w-[1400px] mx-auto px-6 lg:px-10">
                             {/* Video player: spacer div creates 16:9 height, fill div uses flex to push controls to bottom */}
+                            {/* Outer wrapper — position:relative is the containing block for all absolute children */}
                             <div
-                                className="relative w-full rounded-[40px] border border-white/5 shadow-[0_0_100px_rgba(0,0,0,0.5)]"
-                                style={{ background: '#000' }}
+                                ref={playerContainerRef}
+                                onMouseMove={handlePlayerMouseMove}
+                                onMouseLeave={handlePlayerMouseLeave}
+                                style={{
+                                    position: 'relative',
+                                    width: '100%',
+                                    paddingBottom: '56.25%',
+                                    background: '#000',
+                                    borderRadius: '40px',
+                                    border: '1px solid rgba(255,255,255,0.05)',
+                                    boxShadow: '0 0 100px rgba(0,0,0,0.5)',
+                                    cursor: showControls ? 'default' : 'none',
+                                }}
                             >
-                                {/* Spacer: gives outer div its 16:9 height */}
-                                <div style={{ paddingBottom: '56.25%' }} />
+                                {/* Video — fills the padded box */}
+                                <div style={{ position: 'absolute', inset: 0, zIndex: 0, borderRadius: '40px', overflow: 'hidden' }}>
+                                    <video
+                                        ref={videoRef}
+                                        src={`${process.env.NEXT_PUBLIC_API_URL || 'https://meetingmind-backend.100xsam.live'}/api/recordings/${id}/audio?token=${tokenManager.getToken()}`}
+                                        onTimeUpdate={handleTimeUpdate}
+                                        onLoadedMetadata={handleLoadedMetadata}
+                                        onEnded={() => setIsPlaying(false)}
+                                        style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+                                        playsInline
+                                    />
+                                </div>
 
-                                {/* Fill layer: absolute inset-0, uses flex-col to push controls to bottom */}
+                                {/* Click-to-play overlay */}
+                                <div style={{ position: 'absolute', inset: 0, zIndex: 10, cursor: 'pointer' }} onClick={togglePlay} />
+
+                                {/* Controls — pinned to bottom center */}
                                 <div
-                                    ref={playerContainerRef}
-                                    className="absolute inset-0 rounded-[40px] flex flex-col"
-                                    onMouseMove={handlePlayerMouseMove}
-                                    onMouseLeave={handlePlayerMouseLeave}
-                                    style={{ cursor: showControls ? 'default' : 'none' }}
+                                    style={{ position: 'absolute', bottom: '2.5rem', left: 0, right: 0, zIndex: 20, display: 'flex', justifyContent: 'center' }}
+                                    onClick={(e) => e.stopPropagation()}
                                 >
-                                    {/* Video behind everything — absolute fill */}
-                                    <div className="absolute inset-0 rounded-[40px] overflow-hidden">
-                                        <video
-                                            ref={videoRef}
-                                            onClick={togglePlay}
-                                            src={`${process.env.NEXT_PUBLIC_API_URL || 'https://meetingmind-backend.100xsam.live'}/api/recordings/${id}/audio?token=${tokenManager.getToken()}`}
-                                            onTimeUpdate={handleTimeUpdate}
-                                            onLoadedMetadata={handleLoadedMetadata}
-                                            onEnded={() => setIsPlaying(false)}
-                                            className="w-full h-full object-contain cursor-pointer"
-                                            playsInline
-                                        />
-                                    </div>
+                                    <div
+                                        style={{
+                                            width: '42%',
+                                            minWidth: '320px',
+                                            maxWidth: '500px',
+                                            opacity: showControls ? 1 : 0,
+                                            transform: showControls ? 'translateY(0) scale(1)' : 'translateY(16px) scale(0.96)',
+                                            transition: 'all 0.35s cubic-bezier(0.2, 0.8, 0.2, 1)',
+                                            backdropFilter: showControls ? 'blur(20px)' : 'blur(0px)',
+                                            WebkitBackdropFilter: showControls ? 'blur(20px)' : 'blur(0px)',
+                                            pointerEvents: showControls ? 'auto' : 'none',
+                                        }}
+                                        className="bg-black/60 rounded-2xl px-4 py-3 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.5)] border border-white/10 flex flex-col gap-2 overflow-visible"
+                                    >
+                                        {/* Waveform seek bar */}
+                                        <div className="px-1">
+                                            <WaveformSeekBar
+                                                currentTime={currentTime}
+                                                duration={duration}
+                                                onSeek={handleSeek}
+                                                color="#f97316"
+                                            />
+                                        </div>
 
-                                    {/* Flex spacer: pushes controls to bottom */}
-                                    <div className="flex-1 cursor-pointer" onClick={togglePlay} />
-
-                                    {/* Controls row: centered at bottom */}
-                                    <div className="relative z-[200] flex justify-center mb-8 pointer-events-none">
-                                        <div
-                                            style={{
-                                                width: '42%',
-                                                minWidth: '320px',
-                                                maxWidth: '500px',
-                                                opacity: showControls ? 1 : 0,
-                                                transform: showControls ? 'translateY(0) scale(1)' : 'translateY(16px) scale(0.96)',
-                                                transition: 'all 0.35s cubic-bezier(0.2, 0.8, 0.2, 1)',
-                                                backdropFilter: showControls ? 'blur(20px)' : 'blur(0px)',
-                                                WebkitBackdropFilter: showControls ? 'blur(20px)' : 'blur(0px)',
-                                            }}
-                                            className="pointer-events-auto bg-white/90 dark:bg-black/80 rounded-2xl px-4 py-3 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.5)] flex flex-col gap-2 overflow-hidden"
-                                        >
-                                            {/* Waveform seek bar */}
-                                            <div className="px-1">
-                                                <WaveformSeekBar
-                                                    currentTime={currentTime}
-                                                    duration={duration}
-                                                    onSeek={handleSeek}
-                                                    color="#f97316"
-                                                />
+                                        {/* Controls Row */}
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-4 text-white">
+                                                <button onClick={() => skip(-10)} className="opacity-80 hover:opacity-100 transition-all active:scale-90">
+                                                    <RotateCcw className="w-4 h-4" />
+                                                </button>
+                                                <button
+                                                    onClick={togglePlay}
+                                                    className="w-9 h-9 rounded-full bg-primary text-white flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-lg shadow-primary/30"
+                                                >
+                                                    {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current translate-x-px" />}
+                                                </button>
+                                                <button onClick={() => skip(10)} className="opacity-80 hover:opacity-100 transition-all active:scale-90">
+                                                    <RotateCw className="w-4 h-4" />
+                                                </button>
                                             </div>
 
-                                            {/* Controls Row */}
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex items-center gap-4">
-                                                    <button onClick={() => skip(-10)} className="text-black/70 dark:text-white/60 hover:text-primary transition-all active:scale-90">
-                                                        <RotateCcw className="w-4 h-4" />
-                                                    </button>
+                                            <span className="text-[10px] font-mono text-white opacity-70 tabular-nums">
+                                                {formatTime(currentTime)} / {formatTime(duration)}
+                                            </span>
+
+                                            <div className="flex items-center gap-3 text-white">
+                                                <button onClick={toggleMute} className="opacity-80 hover:opacity-100 transition-all">
+                                                    {isMuted || volume === 0 ? <VolumeX className="w-4 h-4 text-red-400" /> : <Volume2 className="w-4 h-4" />}
+                                                </button>
+                                                <div className="relative" ref={speedMenuRef}>
                                                     <button
-                                                        onClick={togglePlay}
-                                                        className="w-9 h-9 rounded-full bg-primary text-white flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-lg shadow-primary/30"
+                                                        onClick={() => setShowSpeedMenu(!showSpeedMenu)}
+                                                        className="text-[10px] font-bold text-white opacity-90 hover:opacity-100 px-2 py-0.5 rounded-md border border-white/20 bg-white/10 hover:border-white/40 transition-all uppercase tracking-widest"
                                                     >
-                                                        {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current translate-x-px" />}
+                                                        {playbackRate}x
                                                     </button>
-                                                    <button onClick={() => skip(10)} className="text-black/70 dark:text-white/60 hover:text-primary transition-all active:scale-90">
-                                                        <RotateCw className="w-4 h-4" />
-                                                    </button>
+                                                    <AnimatePresence>
+                                                        {showSpeedMenu && (
+                                                            <motion.div
+                                                                initial={{ opacity: 0, scale: 0.9, y: 4 }}
+                                                                animate={{ opacity: 1, scale: 1, y: 0 }}
+                                                                exit={{ opacity: 0, scale: 0.9, y: 4 }}
+                                                                style={{ backdropFilter: 'blur(30px)', WebkitBackdropFilter: 'blur(30px)', position: 'absolute', bottom: 'calc(100% + 8px)', right: 0, zIndex: 9999, minWidth: '80px', padding: '4px', background: 'rgba(20,20,22,0.97)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '12px', boxShadow: '0 20px 40px rgba(0,0,0,0.6)' }}
+                                                            >
+                                                                {speedOptions.map((speed) => (
+                                                                    <button
+                                                                        key={speed}
+                                                                        onClick={() => changeSpeed(speed)}
+                                                                        className={cn(
+                                                                            "w-full px-3 py-1.5 text-[10px] font-bold text-left hover:bg-white/10 rounded-lg transition-colors",
+                                                                            speed === playbackRate ? "text-primary bg-primary/10" : "text-white opacity-80"
+                                                                        )}
+                                                                    >
+                                                                        {speed}x
+                                                                    </button>
+                                                                ))}
+                                                            </motion.div>
+                                                        )}
+                                                    </AnimatePresence>
                                                 </div>
-
-                                                <span className="text-[10px] font-mono text-black/60 dark:text-white/50 tabular-nums">
-                                                    {formatTime(currentTime)} / {formatTime(duration)}
-                                                </span>
-
-                                                <div className="flex items-center gap-3">
-                                                    <button onClick={toggleMute} className="text-black/70 dark:text-white/60 hover:text-primary transition-all">
-                                                        {isMuted || volume === 0 ? <VolumeX className="w-4 h-4 text-red-400" /> : <Volume2 className="w-4 h-4" />}
-                                                    </button>
-                                                    <div className="relative" ref={speedMenuRef}>
-                                                        <button
-                                                            onClick={() => setShowSpeedMenu(!showSpeedMenu)}
-                                                            className="text-[10px] font-bold text-black/70 dark:text-white/60 hover:text-primary px-2 py-0.5 rounded-md border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 hover:border-primary/40 transition-all uppercase tracking-widest"
-                                                        >
-                                                            {playbackRate}x
-                                                        </button>
-                                                        <AnimatePresence>
-                                                            {showSpeedMenu && (
-                                                                <motion.div
-                                                                    initial={{ opacity: 0, scale: 0.9, y: -4 }}
-                                                                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                                                                    exit={{ opacity: 0, scale: 0.9, y: -4 }}
-                                                                    style={{ backdropFilter: 'blur(30px)', WebkitBackdropFilter: 'blur(30px)' }}
-                                                                    className="absolute bottom-full right-0 mb-2 border border-black/10 dark:border-white/10 rounded-xl shadow-2xl overflow-hidden z-[300] min-w-[72px] p-1 bg-white/95 dark:bg-[rgba(15,15,18,0.95)]"
-                                                                >
-                                                                    {speedOptions.map((speed) => (
-                                                                        <button
-                                                                            key={speed}
-                                                                            onClick={() => changeSpeed(speed)}
-                                                                            className={cn(
-                                                                                "w-full px-3 py-1.5 text-[10px] font-bold text-left hover:bg-black/5 dark:hover:bg-white/10 rounded-lg transition-colors",
-                                                                                speed === playbackRate ? "text-primary bg-primary/10" : "text-black/70 dark:text-white/60"
-                                                                            )}
-                                                                        >
-                                                                            {speed}x
-                                                                        </button>
-                                                                    ))}
-                                                                </motion.div>
-                                                            )}
-                                                        </AnimatePresence>
-                                                    </div>
-                                                    <button onClick={toggleFullscreen} className="text-black/70 dark:text-white/60 hover:text-primary transition-all">
-                                                        <Maximize className={cn("w-4 h-4", isFullscreen && "text-primary")} />
-                                                    </button>
-                                                </div>
+                                                <button onClick={toggleFullscreen} className="opacity-80 hover:opacity-100 transition-all">
+                                                    <Maximize className={cn("w-4 h-4", isFullscreen && "text-primary")} />
+                                                </button>
                                             </div>
                                         </div>
                                     </div>
