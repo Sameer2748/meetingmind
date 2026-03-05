@@ -23,7 +23,11 @@ import {
     Sparkles,
     MessageCircle,
     Send,
-    Zap
+    Zap,
+    Maximize,
+    VolumeX,
+    Volume1,
+    ArrowRight
 } from "lucide-react";
 import { SidebarProvider, SidebarInset, SidebarRail } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
@@ -213,16 +217,22 @@ export default function RecordingDetails() {
     const [user, setUser] = useState<any>(null);
     const [participants, setParticipants] = useState<string[]>([]);
 
-    // Audio Player State
-    const audioRef = useRef<HTMLAudioElement>(null);
+    // Video Player State
+    const videoRef = useRef<HTMLVideoElement>(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
     const [playbackRate, setPlaybackRate] = useState(1);
+    const [volume, setVolume] = useState(1);
+    const [isMuted, setIsMuted] = useState(false);
     const [showSpeedMenu, setShowSpeedMenu] = useState(false);
+    const [isFullscreen, setIsFullscreen] = useState(false);
     const speedOptions = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
     const speedMenuRef = useRef<HTMLDivElement>(null);
+    const playerContainerRef = useRef<HTMLDivElement>(null);
     const [syncEnabled, setSyncEnabled] = useState(true);
+    const [showControls, setShowControls] = useState(true);
+    const hideControlsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // AI Chat State
     const [isChatOpen, setIsChatOpen] = useState(false);
@@ -302,25 +312,25 @@ export default function RecordingDetails() {
     }, [id, router]);
 
     const togglePlay = () => {
-        if (audioRef.current) {
-            if (isPlaying) audioRef.current.pause();
-            else audioRef.current.play();
+        if (videoRef.current) {
+            if (isPlaying) videoRef.current.pause();
+            else videoRef.current.play();
             setIsPlaying(!isPlaying);
         }
     };
 
     const handleTimeUpdate = () => {
-        if (audioRef.current) setCurrentTime(audioRef.current.currentTime);
+        if (videoRef.current) setCurrentTime(videoRef.current.currentTime);
     };
 
     const handleLoadedMetadata = () => {
-        if (audioRef.current && isFinite(audioRef.current.duration) && audioRef.current.duration > 0) {
-            setDuration(audioRef.current.duration);
+        if (videoRef.current && isFinite(videoRef.current.duration) && videoRef.current.duration > 0) {
+            setDuration(videoRef.current.duration);
         }
     };
 
     const skip = (amount: number) => {
-        if (audioRef.current) audioRef.current.currentTime += amount;
+        if (videoRef.current) videoRef.current.currentTime += amount;
     };
 
     const formatTime = (time: number) => {
@@ -331,15 +341,85 @@ export default function RecordingDetails() {
     };
 
     const handleSeek = (time: number) => {
-        if (audioRef.current) audioRef.current.currentTime = time;
+        if (videoRef.current) videoRef.current.currentTime = time;
         setCurrentTime(time);
+    };
+
+    const handleVolumeChange = (newVolume: number) => {
+        setVolume(newVolume);
+        if (videoRef.current) {
+            videoRef.current.volume = newVolume;
+            videoRef.current.muted = newVolume === 0;
+        }
+        setIsMuted(newVolume === 0);
+    };
+
+    const toggleMute = () => {
+        if (videoRef.current) {
+            const nextMuted = !isMuted;
+            videoRef.current.muted = nextMuted;
+            setIsMuted(nextMuted);
+            if (!nextMuted && volume === 0) {
+                setVolume(0.5);
+                videoRef.current.volume = 0.5;
+            }
+        }
     };
 
     const changeSpeed = (rate: number) => {
         setPlaybackRate(rate);
-        if (audioRef.current) audioRef.current.playbackRate = rate;
+        if (videoRef.current) videoRef.current.playbackRate = rate;
         setShowSpeedMenu(false);
     };
+
+    const toggleFullscreen = () => {
+        if (!playerContainerRef.current) return;
+        if (!document.fullscreenElement) {
+            playerContainerRef.current.requestFullscreen().catch(err => {
+                console.error(`Error attempting to enable full-screen mode: ${err.message}`);
+            });
+            setIsFullscreen(true);
+        } else {
+            document.exitFullscreen();
+            setIsFullscreen(false);
+        }
+    };
+
+    useEffect(() => {
+        const handleFullscreenChange = () => {
+            setIsFullscreen(!!document.fullscreenElement);
+        };
+        document.addEventListener('fullscreenchange', handleFullscreenChange);
+        return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    }, []);
+
+    // Auto-hide controls after 4s of no mouse movement inside the player
+    const resetControlsTimer = useCallback(() => {
+        setShowControls(true);
+        if (hideControlsTimer.current) clearTimeout(hideControlsTimer.current);
+        hideControlsTimer.current = setTimeout(() => {
+            setShowControls(false);
+        }, 4000);
+    }, []);
+
+    const handlePlayerMouseMove = useCallback(() => {
+        resetControlsTimer();
+    }, [resetControlsTimer]);
+
+    const handlePlayerMouseLeave = useCallback(() => {
+        if (hideControlsTimer.current) clearTimeout(hideControlsTimer.current);
+        hideControlsTimer.current = setTimeout(() => {
+            setShowControls(false);
+        }, 1500);
+    }, []);
+
+    // Start the initial timer
+    useEffect(() => {
+        resetControlsTimer();
+        return () => {
+            if (hideControlsTimer.current) clearTimeout(hideControlsTimer.current);
+        };
+    }, [resetControlsTimer]);
 
     const parseTranscript = (text: string) => {
         if (!text) return [];
@@ -368,13 +448,13 @@ export default function RecordingDetails() {
         return parseInt(parts[0]) * 60 + parseInt(parts[1]);
     };
 
-    // Seek audio to exact seconds
+    // Seek video to exact seconds
     const seekToSeconds = useCallback((seconds: number) => {
-        if (audioRef.current) {
-            audioRef.current.currentTime = seconds;
+        if (videoRef.current) {
+            videoRef.current.currentTime = seconds;
             setCurrentTime(seconds);
             if (!isPlaying) {
-                audioRef.current.play();
+                videoRef.current.play().catch(() => { });
                 setIsPlaying(true);
             }
         }
@@ -433,7 +513,9 @@ export default function RecordingDetails() {
         const result: Array<Array<{ word: string; start: number; end: number }>> = [];
         let globalIdx = 0;
         parsedTranscript.forEach((utterance) => {
-            const words = utterance.text.trim().split(/\s+/).filter(w => w.length > 0);
+            // Healer: ensure spaces after punctuation if they were missing in the source
+            const healedText = utterance.text.replace(/([,.!?;:])([A-Za-z])/g, '$1 $2');
+            const words = healedText.trim().split(/\s+/).filter(w => w.length > 0);
             const mapped = words.map((word) => {
                 if (globalIdx < wordTimestampMap.length) {
                     const entry = wordTimestampMap[globalIdx++];
@@ -493,24 +575,46 @@ export default function RecordingDetails() {
             <SidebarProvider className="flex w-full min-h-screen">
                 <AppSidebar user={user} />
                 <SidebarInset className="bg-background flex-1 min-w-0">
-                    <header className="sticky top-0 z-10 flex h-16 shrink-0 items-center gap-4 border-b border-border/10 bg-background/50 backdrop-blur-md px-6">
+                    <header className="sticky top-0 z-[200] flex h-16 shrink-0 items-center gap-4 border-b border-white/5 bg-black/50 backdrop-blur-xl px-6">
                         <button
                             onClick={() => router.back()}
-                            className="p-2 hover:bg-muted rounded-full transition-colors"
+                            className="p-2 hover:bg-white/10 rounded-full transition-colors text-white/70 hover:text-white"
                         >
                             <ChevronLeft className="w-5 h-5" />
                         </button>
                         <div className="flex flex-col">
-                            <h1 className="text-sm font-bold tracking-tight truncate max-w-[200px] md:max-w-md">
+                            <h1 className="text-sm font-bold tracking-tight text-white/90">
                                 {recording.meeting_url.split('/').pop() || "Untitled Meeting"}
                             </h1>
-                            <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-black">
-                                Session Insights
+                            <span className="text-[10px] uppercase tracking-widest text-primary font-black">
+                                Cinema Mode
                             </span>
                         </div>
 
+                        {/* Session Metadata Badges */}
+                        <div className="hidden xl:flex items-center gap-5 ml-8 pl-8 border-l border-white/10 text-white/50">
+                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/5 border border-white/5">
+                                <Clock className="w-3.5 h-3.5 text-primary" />
+                                <span className="text-[11px] font-bold tabular-nums text-white/80">{formatTime(duration)}</span>
+                            </div>
+                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/5 border border-white/5">
+                                <Calendar className="w-3.5 h-3.5 text-primary" />
+                                <span className="text-[11px] font-bold text-white/80">{format(new Date(recording.created_at), 'MMM dd, yyyy')}</span>
+                            </div>
+                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-primary/10 border border-primary/20">
+                                <div className="flex -space-x-1 mr-2">
+                                    {[...Array(Math.min(3, Array.from(new Set(parsedTranscript.map(u => u.speaker))).length))].map((_, i) => (
+                                        <div key={i} className="w-3.5 h-3.5 rounded-full border border-background bg-primary/30 flex items-center justify-center text-[7px] font-bold text-primary">
+                                            {String.fromCharCode(65 + i)}
+                                        </div>
+                                    ))}
+                                </div>
+                                <span className="text-[10px] font-black uppercase tracking-tight text-primary">{Array.from(new Set(parsedTranscript.map(u => u.speaker))).length} Speakers</span>
+                            </div>
+                        </div>
+
                         <div className="ml-auto flex items-center gap-2">
-                            <button className="hidden sm:flex items-center gap-2 px-4 py-2 hover:bg-muted rounded-xl text-xs font-bold transition-all border border-border/50">
+                            <button className="hidden sm:flex items-center gap-2 px-4 py-2 hover:bg-white/10 rounded-xl text-xs font-bold transition-all border border-white/10 text-white/70 hover:text-white">
                                 <Share2 className="w-4 h-4" /> Share
                             </button>
                             <a
@@ -523,443 +627,346 @@ export default function RecordingDetails() {
                         </div>
                     </header>
 
-                    <div className="max-w-[1400px] mx-auto w-full p-6 lg:p-10">
-                        <audio
-                            ref={audioRef}
-                            src={`${process.env.NEXT_PUBLIC_API_URL || 'https://meetingmind-backend.100xsam.live'}/api/recordings/${id}/audio?token=${tokenManager.getToken()}`}
-                            onTimeUpdate={handleTimeUpdate}
-                            onLoadedMetadata={handleLoadedMetadata}
-                            onEnded={() => setIsPlaying(false)}
-                        />
-
-                        {/* Row 1: Session Details + Player side by side */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-
-                            {/* Session Details Card */}
-                            <motion.div
-                                initial={{ opacity: 0, y: 20 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ delay: 0.05 }}
-                                className="bg-card border border-border/50 rounded-[28px] p-6 shadow-lg h-full hover:shadow-2xl hover:shadow-primary/5 hover:border-primary/30 hover:-translate-y-1 transition-all duration-300 cursor-default"
+                    <div className="w-full bg-[#050505] dark:bg-[#0c0c0e] py-12 lg:py-20 border-b border-white/5 relative z-10">
+                        <div className="max-w-[1400px] mx-auto px-6 lg:px-10">
+                            {/* Video player: spacer div creates 16:9 height, fill div uses flex to push controls to bottom */}
+                            <div
+                                className="relative w-full rounded-[40px] border border-white/5 shadow-[0_0_100px_rgba(0,0,0,0.5)]"
+                                style={{ background: '#000' }}
                             >
-                                <h3 className="text-lg font-bold mb-6 tracking-tight">Session Details</h3>
-                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1.5rem" }}>
-                                    {/* Recorded On */}
-                                    <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                                        <div className="w-10 h-10 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
-                                            <Calendar className="w-5 h-5 text-primary" />
-                                        </div>
-                                        <div className="min-w-0">
-                                            <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1">Recorded On</p>
-                                            <p className="font-semibold text-sm truncate">{format(new Date(recording.created_at), 'MMM dd, yyyy')}</p>
-                                        </div>
-                                    </div>
+                                {/* Spacer: gives outer div its 16:9 height */}
+                                <div style={{ paddingBottom: '56.25%' }} />
 
-                                    {/* Duration */}
-                                    <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                                        <div className="w-10 h-10 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
-                                            <Clock className="w-5 h-5 text-primary" />
-                                        </div>
-                                        <div>
-                                            <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1">Duration</p>
-                                            <p className="font-semibold text-sm">{formatTime(duration)}</p>
-                                        </div>
-                                    </div>
-
-                                    {/* Status */}
-                                    <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                                        <div className="w-10 h-10 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
-                                            <Volume2 className="w-5 h-5 text-primary" />
-                                        </div>
-                                        <div>
-                                            <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-1">Status</p>
-                                            <div className="flex items-center gap-1.5">
-                                                <div className="relative flex h-2 w-2">
-                                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-500 opacity-75"></span>
-                                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                                                </div>
-                                                <p className="font-semibold text-sm capitalize">{recording.status || 'Ready'}</p>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Participants */}
-                                    <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                                        <div className="w-10 h-10 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
-                                            <FileText className="w-5 h-5 text-primary" />
-                                        </div>
-                                        <div>
-                                            <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-2">Participants</p>
-                                            <div className="flex -space-x-2">
-                                                {participants.map((speaker, i) => {
-                                                    const colors = [
-                                                        'bg-primary/15 text-primary',
-                                                        'bg-blue-500/15 text-blue-600',
-                                                        'bg-emerald-500/15 text-emerald-600',
-                                                        'bg-violet-500/15 text-violet-600',
-                                                        'bg-amber-500/15 text-amber-600',
-                                                    ];
-                                                    const colorClass = colors[i % colors.length];
-                                                    return (
-                                                        <div
-                                                            key={i}
-                                                            className={`w-8 h-8 rounded-full ${colorClass} border-2 border-card flex items-center justify-center font-bold text-[10px] shadow-sm hover:z-10 transition-transform hover:-translate-y-1 cursor-default`}
-                                                            title={`Speaker ${speaker}`}
-                                                        >
-                                                            S{speaker}
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </motion.div>
-
-                            {/* Player Card */}
-                            <motion.div
-                                initial={{ opacity: 0, y: 20 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ delay: 0.1 }}
-                                className="bg-card dark:bg-[#1c1c1e] border border-border/50 dark:border-white/10 rounded-[28px] p-6 shadow-lg flex flex-col justify-between h-full hover:shadow-2xl hover:shadow-primary/5 hover:border-primary/30 dark:hover:border-primary/20 hover:-translate-y-1 transition-all duration-300"
-                            >
-                                {/* Row 1: Artwork + Title + Speed Control */}
-                                <div className="flex items-center gap-4 mb-6">
-                                    <div
-                                        className="rounded-2xl flex items-center justify-center shrink-0 w-16 h-16"
-                                        style={{ background: 'linear-gradient(135deg, #e07155, #f09070, #c8a0e8)' }}
-                                    >
-                                        <Brain className="w-8 h-8 text-white drop-shadow-sm" />
-                                    </div>
-                                    <div className="min-w-0 flex-1">
-                                        <h2 className="text-base font-semibold text-foreground dark:text-white truncate leading-tight mb-0.5">
-                                            {recording.meeting_url?.split('/').pop() || "Untitled Meeting"}
-                                        </h2>
-                                        <p className="text-xs text-muted-foreground dark:text-white/50">MeetingMind Session</p>
-                                    </div>
-                                    <div className="relative shrink-0" ref={speedMenuRef}>
-                                        <button
-                                            onClick={() => setShowSpeedMenu(!showSpeedMenu)}
-                                            className="inline-flex items-center px-3 py-1.5 rounded-full text-sm font-bold border transition-all hover:scale-105 active:scale-95 shadow-sm bg-white/80 dark:bg-white/10 text-foreground dark:text-white gap-1.5"
-                                            style={{
-                                                borderColor: playbackRate !== 1 ? '#e07155' : 'rgba(150,150,150,0.25)',
-                                                color: playbackRate !== 1 ? '#e07155' : undefined,
-                                            }}
-                                        >
-                                            <ChevronDown
-                                                className="w-3.5 h-3.5 transition-transform duration-200"
-                                                style={{ transform: showSpeedMenu ? 'rotate(180deg)' : 'rotate(0deg)' }}
-                                            />
-                                            <span>{playbackRate}x</span>
-                                        </button>
-                                        <AnimatePresence>
-                                            {showSpeedMenu && (
-                                                <motion.div
-                                                    initial={{ opacity: 0, y: 8, scale: 0.95 }}
-                                                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                                                    exit={{ opacity: 0, y: 8, scale: 0.95 }}
-                                                    transition={{ duration: 0.15 }}
-                                                    className="absolute top-full right-0 mt-2 bg-card dark:bg-[#2a2a2e] border border-border/50 dark:border-white/10 rounded-2xl shadow-xl overflow-hidden z-50"
-                                                    style={{ minWidth: 100 }}
-                                                >
-                                                    {speedOptions.map((speed) => (
-                                                        <button
-                                                            key={speed}
-                                                            onClick={() => changeSpeed(speed)}
-                                                            className={cn(
-                                                                "w-full px-4 py-2.5 text-sm font-medium text-left transition-colors",
-                                                                speed === playbackRate
-                                                                    ? "text-white"
-                                                                    : "text-foreground/70 dark:text-white/70 hover:bg-muted dark:hover:bg-white/10"
-                                                            )}
-                                                            style={speed === playbackRate ? { backgroundColor: '#e07155' } : {}}
-                                                        >
-                                                            {speed}x
-                                                        </button>
-                                                    ))}
-                                                </motion.div>
-                                            )}
-                                        </AnimatePresence>
-                                    </div>
-                                </div>
-
-                                {/* Row 2: Waveform Seek Bar */}
-                                <div className="mt-8 mb-6">
-                                    <div className="flex items-center gap-3">
-                                        <span className="text-[11px] font-medium text-muted-foreground dark:text-white/40 tabular-nums w-10 text-left shrink-0">
-                                            {formatTime(currentTime)}
-                                        </span>
-                                        <WaveformSeekBar
-                                            currentTime={currentTime}
-                                            duration={duration}
-                                            onSeek={handleSeek}
-                                            color="#e07155"
-                                        />
-                                        <span className="text-[11px] font-medium text-muted-foreground dark:text-white/40 tabular-nums w-12 text-right shrink-0">
-                                            -{formatTime(Math.max(0, duration - currentTime))}
-                                        </span>
-                                    </div>
-                                </div>
-
-                                {/* Row 3: Speed + Controls */}
-                                <div className="flex items-center">
-                                    {/* Controls — center */}
-                                    <div className="flex items-center justify-center w-full" style={{ gap: '40px' }}>
-                                        <button
-                                            onClick={() => skip(-10)}
-                                            className="relative flex items-center justify-center text-foreground/80 dark:text-white/80 hover:text-foreground dark:hover:text-white transition-all active:scale-90"
-                                        >
-                                            <RotateCcw className="w-10 h-10 stroke-[1.5px]" />
-                                            <span className="absolute text-[10px] font-bold mt-[2.5px]">10</span>
-                                        </button>
-
-                                        <button
+                                {/* Fill layer: absolute inset-0, uses flex-col to push controls to bottom */}
+                                <div
+                                    ref={playerContainerRef}
+                                    className="absolute inset-0 rounded-[40px] flex flex-col"
+                                    onMouseMove={handlePlayerMouseMove}
+                                    onMouseLeave={handlePlayerMouseLeave}
+                                    style={{ cursor: showControls ? 'default' : 'none' }}
+                                >
+                                    {/* Video behind everything — absolute fill */}
+                                    <div className="absolute inset-0 rounded-[40px] overflow-hidden">
+                                        <video
+                                            ref={videoRef}
                                             onClick={togglePlay}
-                                            className="w-16 h-16 rounded-full flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-lg active:shadow-md shrink-0"
-                                            style={{ backgroundColor: '#e07155' }}
-                                        >
-                                            {isPlaying ? (
-                                                <Pause className="w-8 h-8 text-white fill-white" />
-                                            ) : (
-                                                <Play className="w-8 h-8 text-white fill-white translate-x-1" />
-                                            )}
-                                        </button>
-
-                                        <button
-                                            onClick={() => skip(10)}
-                                            className="relative flex items-center justify-center text-foreground/80 dark:text-white/80 hover:text-foreground dark:hover:text-white transition-all active:scale-90"
-                                        >
-                                            <RotateCw className="w-10 h-10 stroke-[1.5px]" />
-                                            <span className="absolute text-[10px] font-bold mt-[2.5px]">10</span>
-                                        </button>
+                                            src={`${process.env.NEXT_PUBLIC_API_URL || 'https://meetingmind-backend.100xsam.live'}/api/recordings/${id}/audio?token=${tokenManager.getToken()}`}
+                                            onTimeUpdate={handleTimeUpdate}
+                                            onLoadedMetadata={handleLoadedMetadata}
+                                            onEnded={() => setIsPlaying(false)}
+                                            className="w-full h-full object-contain cursor-pointer"
+                                            playsInline
+                                        />
                                     </div>
 
+                                    {/* Flex spacer: pushes controls to bottom */}
+                                    <div className="flex-1 cursor-pointer" onClick={togglePlay} />
 
+                                    {/* Controls row: centered at bottom */}
+                                    <div className="relative z-[200] flex justify-center mb-8 pointer-events-none">
+                                        <div
+                                            style={{
+                                                width: '42%',
+                                                minWidth: '320px',
+                                                maxWidth: '500px',
+                                                opacity: showControls ? 1 : 0,
+                                                transform: showControls ? 'translateY(0) scale(1)' : 'translateY(16px) scale(0.96)',
+                                                transition: 'all 0.35s cubic-bezier(0.2, 0.8, 0.2, 1)',
+                                                backdropFilter: showControls ? 'blur(20px)' : 'blur(0px)',
+                                                WebkitBackdropFilter: showControls ? 'blur(20px)' : 'blur(0px)',
+                                            }}
+                                            className="pointer-events-auto bg-white/90 dark:bg-black/80 rounded-2xl px-4 py-3 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.5)] flex flex-col gap-2 overflow-hidden"
+                                        >
+                                            {/* Waveform seek bar */}
+                                            <div className="px-1">
+                                                <WaveformSeekBar
+                                                    currentTime={currentTime}
+                                                    duration={duration}
+                                                    onSeek={handleSeek}
+                                                    color="#f97316"
+                                                />
+                                            </div>
+
+                                            {/* Controls Row */}
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-4">
+                                                    <button onClick={() => skip(-10)} className="text-black/70 dark:text-white/60 hover:text-primary transition-all active:scale-90">
+                                                        <RotateCcw className="w-4 h-4" />
+                                                    </button>
+                                                    <button
+                                                        onClick={togglePlay}
+                                                        className="w-9 h-9 rounded-full bg-primary text-white flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-lg shadow-primary/30"
+                                                    >
+                                                        {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current translate-x-px" />}
+                                                    </button>
+                                                    <button onClick={() => skip(10)} className="text-black/70 dark:text-white/60 hover:text-primary transition-all active:scale-90">
+                                                        <RotateCw className="w-4 h-4" />
+                                                    </button>
+                                                </div>
+
+                                                <span className="text-[10px] font-mono text-black/60 dark:text-white/50 tabular-nums">
+                                                    {formatTime(currentTime)} / {formatTime(duration)}
+                                                </span>
+
+                                                <div className="flex items-center gap-3">
+                                                    <button onClick={toggleMute} className="text-black/70 dark:text-white/60 hover:text-primary transition-all">
+                                                        {isMuted || volume === 0 ? <VolumeX className="w-4 h-4 text-red-400" /> : <Volume2 className="w-4 h-4" />}
+                                                    </button>
+                                                    <div className="relative" ref={speedMenuRef}>
+                                                        <button
+                                                            onClick={() => setShowSpeedMenu(!showSpeedMenu)}
+                                                            className="text-[10px] font-bold text-black/70 dark:text-white/60 hover:text-primary px-2 py-0.5 rounded-md border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 hover:border-primary/40 transition-all uppercase tracking-widest"
+                                                        >
+                                                            {playbackRate}x
+                                                        </button>
+                                                        <AnimatePresence>
+                                                            {showSpeedMenu && (
+                                                                <motion.div
+                                                                    initial={{ opacity: 0, scale: 0.9, y: -4 }}
+                                                                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                                                                    exit={{ opacity: 0, scale: 0.9, y: -4 }}
+                                                                    style={{ backdropFilter: 'blur(30px)', WebkitBackdropFilter: 'blur(30px)' }}
+                                                                    className="absolute bottom-full right-0 mb-2 border border-black/10 dark:border-white/10 rounded-xl shadow-2xl overflow-hidden z-[300] min-w-[72px] p-1 bg-white/95 dark:bg-[rgba(15,15,18,0.95)]"
+                                                                >
+                                                                    {speedOptions.map((speed) => (
+                                                                        <button
+                                                                            key={speed}
+                                                                            onClick={() => changeSpeed(speed)}
+                                                                            className={cn(
+                                                                                "w-full px-3 py-1.5 text-[10px] font-bold text-left hover:bg-black/5 dark:hover:bg-white/10 rounded-lg transition-colors",
+                                                                                speed === playbackRate ? "text-primary bg-primary/10" : "text-black/70 dark:text-white/60"
+                                                                            )}
+                                                                        >
+                                                                            {speed}x
+                                                                        </button>
+                                                                    ))}
+                                                                </motion.div>
+                                                            )}
+                                                        </AnimatePresence>
+                                                    </div>
+                                                    <button onClick={toggleFullscreen} className="text-black/70 dark:text-white/60 hover:text-primary transition-all">
+                                                        <Maximize className={cn("w-4 h-4", isFullscreen && "text-primary")} />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
-                            </motion.div>
+                            </div>
                         </div>
 
-                        {/* Row 2: Full Transcript */}
-                        <motion.div
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: 0.15 }}
-                        >
-                            <div className="flex items-center justify-between mb-6">
-                                <h3 className="text-2xl font-semibold tracking-tight">Full Transcript</h3>
-                                {recording.transcript_text && (
-                                    <button
-                                        onClick={() => setSyncEnabled(v => !v)}
-                                        title={syncEnabled ? "Disable transcript sync" : "Enable transcript sync"}
-                                        className={cn(
-                                            "flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border",
-                                            syncEnabled
-                                                ? "bg-primary text-white border-primary shadow-sm shadow-primary/20"
-                                                : "bg-muted text-muted-foreground border-border/40 hover:border-primary/30"
-                                        )}
-                                    >
-                                        <Zap className={cn("w-3.5 h-3.5", syncEnabled && "fill-white")} />
-                                        Sync
-                                    </button>
-                                )}
-                            </div>
-                            <div className="bg-card border border-border/40 rounded-[32px] p-6 lg:p-12 leading-relaxed text-lg font-medium shadow-lg hover:shadow-2xl hover:shadow-primary/5 hover:border-primary/30 transition-all duration-300">
-                                {recording.transcript_text ? (
-                                    <div className="space-y-10">
-                                        {parsedTranscript.map((utterance, i) => {
-                                            const colors = [
-                                                'bg-primary/15 text-primary',
-                                                'bg-blue-500/15 text-blue-600',
-                                                'bg-emerald-500/15 text-emerald-600',
-                                                'bg-violet-500/15 text-violet-600',
-                                                'bg-amber-500/15 text-amber-600',
-                                            ];
-                                            // Fallback logic to pick a color based on speaker ID (e.g. "0", "1", or "A")
-                                            const speakerIdx = isNaN(parseInt(utterance.speaker))
-                                                ? utterance.speaker.charCodeAt(0) % colors.length
-                                                : parseInt(utterance.speaker) % colors.length;
-                                            const utteranceWords = wordTimes?.[i];
+                        <div className="max-w-[1400px] mx-auto w-full p-6 lg:px-12 lg:pb-24 lg:pt-6">
+                            <div className="space-y-6 group/transcript">
+                                <div className="flex items-center justify-between">
+                                    <div className="space-y-1">
+                                        <h3 className="text-3xl font-bold tracking-tight">Transcript</h3>
+                                        <p className="text-xs text-muted-foreground uppercase tracking-widest font-bold">Deepgram AI Generated</p>
+                                    </div>
+                                    {recording.transcript_text && (
+                                        <button
+                                            onClick={() => setSyncEnabled(v => !v)}
+                                            className={cn(
+                                                "flex items-center gap-2 px-5 py-2.5 rounded-2xl text-xs font-bold transition-all border shadow-lg",
+                                                syncEnabled
+                                                    ? "bg-primary text-white border-primary shadow-primary/20"
+                                                    : "bg-muted text-muted-foreground border-border/40 hover:border-primary/30"
+                                            )}
+                                        >
+                                            <Sparkles className={cn("w-4 h-4", syncEnabled && "fill-white")} />
+                                            {syncEnabled ? "Sync Active" : "Enable Sync"}
+                                        </button>
+                                    )}
+                                </div>
 
-                                            return (
-                                                <div key={i} className="group/para">
-                                                    <div className="flex items-center gap-3 mb-3">
-                                                        <div className={`w-8 h-8 rounded-lg ${colors[speakerIdx]} flex items-center justify-center text-[10px] font-bold uppercase`}>
-                                                            S{utterance.speaker}
+                                <div className="bg-white/50 dark:bg-[#0f0f12]/50 backdrop-blur-3xl border border-black/5 dark:border-white/5 rounded-[48px] p-8 lg:p-14 leading-relaxed shadow-xl">
+                                    {recording.transcript_text ? (
+                                        <div className="space-y-12">
+                                            {parsedTranscript.map((utterance, i) => {
+                                                const colors = [
+                                                    'bg-primary/10 text-primary',
+                                                    'bg-blue-500/10 text-blue-600',
+                                                    'bg-emerald-500/10 text-emerald-600',
+                                                    'bg-violet-500/10 text-violet-600',
+                                                    'bg-amber-500/10 text-amber-600',
+                                                ];
+                                                const speakerIdx = isNaN(parseInt(utterance.speaker))
+                                                    ? utterance.speaker.charCodeAt(0) % colors.length
+                                                    : parseInt(utterance.speaker) % colors.length;
+                                                const utteranceWords = wordTimes?.[i];
+
+                                                return (
+                                                    <div key={i} className="group/para">
+                                                        <div className="flex items-center gap-4 mb-4">
+                                                            <div className={`w-10 h-10 rounded-xl ${colors[speakerIdx]} flex items-center justify-center text-[11px] font-black shadow-sm`}>
+                                                                S{utterance.speaker}
+                                                            </div>
+                                                            <button
+                                                                onClick={() => seekToTime(utterance.time)}
+                                                                className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground opacity-30 group-hover/para:opacity-100 transition-opacity hover:text-primary cursor-pointer"
+                                                            >
+                                                                SPEAKER {utterance.speaker} &nbsp;•&nbsp; {utterance.time}
+                                                            </button>
                                                         </div>
-                                                        <button
-                                                            onClick={() => seekToTime(utterance.time)}
-                                                            className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground opacity-50 group-hover/para:opacity-100 transition-opacity hover:text-primary cursor-pointer"
-                                                        >
-                                                            Speaker {utterance.speaker} &bull; {utterance.time}
-                                                        </button>
-                                                    </div>
-                                                    <p className="leading-relaxed font-normal">
-                                                        {/* Spotify-style word coloring when sync enabled + word timestamps available */}
-                                                        {syncEnabled && utteranceWords ? (
-                                                            utteranceWords.map((w, wi) => {
-                                                                const isPlayed = currentTime >= w.end && w.end > 0;
-                                                                const isCurrent = currentTime >= w.start && currentTime < w.end && w.end > 0;
-                                                                const progress = isCurrent
-                                                                    ? Math.min(1, (currentTime - w.start) / Math.max(0.01, w.end - w.start))
-                                                                    : isPlayed ? 1 : 0;
-                                                                const splitAt = Math.round(progress * w.word.length);
-                                                                return (
-                                                                    <span
-                                                                        key={wi}
-                                                                        onClick={() => seekToSeconds(w.start)}
-                                                                        className="cursor-pointer"
-                                                                        title={w.word}
-                                                                    >
-                                                                        {splitAt > 0 && (
-                                                                            <span style={{ color: '#f97316', fontWeight: isCurrent ? 600 : 'inherit' }}>
-                                                                                {w.word.substring(0, splitAt)}
+                                                        <p className="text-xl font-medium leading-[1.8] text-foreground/90">
+                                                            {syncEnabled && utteranceWords ? (
+                                                                utteranceWords.map((w, wi) => {
+                                                                    const isPlayed = currentTime >= w.end && w.end > 0;
+                                                                    const isCurrent = currentTime >= w.start && currentTime < w.end && w.end > 0;
+                                                                    const progress = isCurrent
+                                                                        ? Math.min(1, (currentTime - w.start) / Math.max(0.01, w.end - w.start))
+                                                                        : isPlayed ? 1 : 0;
+                                                                    const splitAt = Math.round(progress * w.word.length);
+                                                                    return (
+                                                                        <span key={wi}>
+                                                                            <span
+                                                                                onClick={() => seekToSeconds(w.start)}
+                                                                                className="cursor-pointer hover:text-primary transition-colors"
+                                                                            >
+                                                                                {splitAt > 0 && (
+                                                                                    <span style={{ color: '#f97316' }}>
+                                                                                        {w.word.substring(0, splitAt)}
+                                                                                    </span>
+                                                                                )}
+                                                                                <span style={{ opacity: isCurrent ? 1 : isPlayed ? 0.35 : 0.85 }}>
+                                                                                    {w.word.substring(splitAt)}
+                                                                                </span>
                                                                             </span>
-                                                                        )}
-                                                                        <span style={{ opacity: isPlayed ? 0.5 : 0.85 }}>
-                                                                            {w.word.substring(splitAt)}
+                                                                            {' '}
                                                                         </span>
-                                                                        {' '}
-                                                                    </span>
-                                                                );
-                                                            })
-                                                        ) : (
-                                                            // Sync OFF or no word-timestamps: plain text, click segment header to seek
-                                                            <span className="opacity-80">{utterance.text}</span>
-                                                        )}
-                                                    </p>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                ) : (
-                                    <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
-                                        <div className="w-20 h-20 rounded-full bg-muted/50 flex items-center justify-center mb-6">
-                                            <FileText className="w-10 h-10 opacity-20" />
+                                                                    );
+                                                                })
+                                                            ) : (
+                                                                <span className="opacity-70">{utterance.text}</span>
+                                                            )}
+                                                        </p>
+                                                    </div>
+                                                );
+                                            })}
                                         </div>
-                                        {recording.status === 'completed' ? (
-                                            <p className="font-medium tracking-wider uppercase text-xs opacity-40">No speech detected in this recording</p>
-                                        ) : (
-                                            <p className="font-medium tracking-wider uppercase text-xs opacity-40">Transcript is being processed...</p>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-                        </motion.div>
-                    </div>
-                </SidebarInset>
-                <SidebarRail />
-            </SidebarProvider>
-
-            {/* AI Chat Assistant */}
-            {
-                mounted && (
-                    <div style={{ position: 'fixed', bottom: '2rem', right: '2rem', zIndex: 99999, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', pointerEvents: 'none' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', pointerEvents: 'auto' }}>
-                            <AnimatePresence>
-                                {isChatOpen && (
-                                    <motion.div
-                                        initial={{ opacity: 0, scale: 0.9, y: 20 }}
-                                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                                        exit={{ opacity: 0, scale: 0.9, y: 20 }}
-                                        style={{ width: '380px', minWidth: '380px', maxWidth: '380px', height: '520px', maxHeight: 'calc(100vh - 8rem)', display: 'flex', flexDirection: 'column', overflow: 'hidden', marginBottom: '1rem' }}
-                                        className="bg-card border border-border/40 rounded-[24px] shadow-2xl"
-                                    >
-                                        {/* Header */}
-                                        <div className="p-4 border-b border-border/40 flex items-center justify-between bg-primary/5 shrink-0">
-                                            <div className="flex items-center gap-2">
-                                                <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center">
-                                                    <Sparkles className="w-4 h-4 text-primary" />
-                                                </div>
-                                                <div>
-                                                    <h4 className="text-sm font-semibold">MeetingMind AI</h4>
-                                                    <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Active Context: Transcript</p>
-                                                </div>
+                                    ) : (
+                                        <div className="flex flex-col items-center justify-center py-24 text-muted-foreground">
+                                            <div className="w-20 h-20 rounded-full bg-muted/20 flex items-center justify-center mb-6">
+                                                <FileText className="w-10 h-10 opacity-10" />
                                             </div>
-                                            <button onClick={() => setIsChatOpen(false)} className="p-1 hover:bg-muted rounded-full transition-colors">
-                                                <X className="w-4 h-4" />
-                                            </button>
+                                            <p className="text-xs font-black uppercase tracking-widest opacity-30">Generating Transcript...</p>
                                         </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </div>{/* closes w-full bg-[#050505] section */}
 
-                                        {/* Messages */}
-                                        <div ref={chatContainerRef} style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                                            {chatMessages.length === 0 && (
-                                                <div className="text-center py-10 px-6">
-                                                    <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
-                                                        <Brain className="w-6 h-6 text-primary" />
+                    {/* AI Chat Assistant */}
+                    {mounted && (
+                        <div style={{ position: 'fixed', bottom: '2rem', right: '2rem', zIndex: 99999, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', pointerEvents: 'none' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', pointerEvents: 'auto' }}>
+                                <AnimatePresence>
+                                    {isChatOpen && (
+                                        <motion.div
+                                            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                                            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                                            style={{ width: '380px', minWidth: '380px', maxWidth: '380px', height: '520px', maxHeight: 'calc(100vh - 8rem)', display: 'flex', flexDirection: 'column', overflow: 'hidden', marginBottom: '1rem' }}
+                                            className="bg-card border border-border/40 rounded-[24px] shadow-2xl"
+                                        >
+                                            {/* Header */}
+                                            <div className="p-4 border-b border-border/40 flex items-center justify-between bg-primary/5 shrink-0">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center">
+                                                        <Sparkles className="w-4 h-4 text-primary" />
                                                     </div>
-                                                    <p className="text-sm font-medium">Hello! I've read the meeting transcript.</p>
-                                                    <p className="text-xs text-muted-foreground mt-2">Ask me anything about what was discussed, action items, or a summary.</p>
-                                                </div>
-                                            )}
-                                            {chatMessages.map((msg: any, idx: number) => (
-                                                <div key={idx} style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
-                                                    <div
-                                                        className={msg.role === 'user' ? 'text-white' : 'text-foreground'}
-                                                        style={{ maxWidth: '75%', wordBreak: 'break-word', overflowWrap: 'break-word', padding: '10px 14px', borderRadius: msg.role === 'user' ? '18px 4px 18px 18px' : '4px 18px 18px 18px', fontSize: '0.875rem', lineHeight: '1.5', backgroundColor: msg.role === 'user' ? '#f97316' : 'rgba(128,128,128,0.15)', border: msg.role === 'user' ? 'none' : '1px solid rgba(128,128,128,0.2)' }}
-                                                    >
-                                                        {msg.text.split('\n').map((line: string, i: number) => (
-                                                            <p key={i} style={{ margin: i > 0 ? '4px 0 0' : '0' }}>{line}</p>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            ))}
-                                            {isChatLoading && (
-                                                <div className="flex justify-start">
-                                                    <div className="bg-muted p-3 rounded-2xl rounded-tl-none border border-border/20">
-                                                        <div className="flex gap-1">
-                                                            <span className="w-1.5 h-1.5 rounded-full bg-primary/40 animate-bounce" style={{ animationDelay: '0ms' }} />
-                                                            <span className="w-1.5 h-1.5 rounded-full bg-primary/40 animate-bounce" style={{ animationDelay: '200ms' }} />
-                                                            <span className="w-1.5 h-1.5 rounded-full bg-primary/40 animate-bounce" style={{ animationDelay: '400ms' }} />
-                                                        </div>
+                                                    <div>
+                                                        <h4 className="text-sm font-semibold">MeetingMind AI</h4>
+                                                        <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Active Context: Transcript</p>
                                                     </div>
                                                 </div>
-                                            )}
-                                        </div>
-
-                                        {/* Input */}
-                                        <div className="p-4 pt-2 border-t border-border/40 bg-card shrink-0">
-                                            <div className="flex items-center gap-2">
-                                                <input
-                                                    type="text"
-                                                    value={chatInput}
-                                                    onChange={(e) => setChatInput(e.target.value)}
-                                                    onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-                                                    placeholder="Ask a question..."
-                                                    disabled={isChatLoading}
-                                                    className="flex-1 bg-muted/50 border border-border/40 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition-all disabled:opacity-50"
-                                                />
-                                                <button
-                                                    onClick={handleSendMessage}
-                                                    disabled={!chatInput.trim() || isChatLoading}
-                                                    className="shrink-0 w-10 h-10 bg-primary text-white rounded-xl flex items-center justify-center hover:opacity-90 transition-opacity disabled:opacity-30"
-                                                >
-                                                    <Send className="w-4 h-4" />
+                                                <button onClick={() => setIsChatOpen(false)} className="p-1 hover:bg-muted rounded-full transition-colors">
+                                                    <X className="w-4 h-4" />
                                                 </button>
                                             </div>
-                                            <p className="text-[10px] text-center text-muted-foreground mt-2">AI can make mistakes. Verify important info.</p>
-                                        </div>
-                                    </motion.div>
-                                )}
-                            </AnimatePresence>
 
-                            {/* Toggle Button */}
-                            <div style={{ position: 'relative' }}>
-                                {!isChatOpen && <span className="absolute inset-0 rounded-full bg-primary animate-ping opacity-25" />}
-                                <button
-                                    onClick={() => setIsChatOpen(!isChatOpen)}
-                                    style={{ position: 'relative', zIndex: 99999 }}
-                                    className={cn(
-                                        "w-14 h-14 rounded-full flex items-center justify-center shadow-2xl transition-all duration-300 hover:scale-110 active:scale-95",
-                                        isChatOpen ? "bg-muted text-foreground border border-border/40" : "bg-primary text-white border-4 border-background ring-2 ring-primary/20"
+                                            {/* Messages */}
+                                            <div ref={chatContainerRef} style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                                {chatMessages.length === 0 && (
+                                                    <div className="text-center py-10 px-6">
+                                                        <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
+                                                            <Brain className="w-6 h-6 text-primary" />
+                                                        </div>
+                                                        <p className="text-sm font-medium">Hello! I've read the meeting transcript.</p>
+                                                        <p className="text-xs text-muted-foreground mt-2">Ask me anything about what was discussed, action items, or a summary.</p>
+                                                    </div>
+                                                )}
+                                                {chatMessages.map((msg: any, idx: number) => (
+                                                    <div key={idx} style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
+                                                        <div
+                                                            className={msg.role === 'user' ? 'text-white' : 'text-foreground'}
+                                                            style={{ maxWidth: '75%', wordBreak: 'break-word', overflowWrap: 'break-word', padding: '10px 14px', borderRadius: msg.role === 'user' ? '18px 4px 18px 18px' : '4px 18px 18px 18px', fontSize: '0.875rem', lineHeight: '1.5', backgroundColor: msg.role === 'user' ? '#f97316' : 'rgba(128,128,128,0.15)', border: msg.role === 'user' ? 'none' : '1px solid rgba(128,128,128,0.2)' }}
+                                                        >
+                                                            {msg.text.split('\n').map((line: string, i: number) => (
+                                                                <p key={i} style={{ margin: i > 0 ? '4px 0 0' : '0' }}>{line}</p>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                                {isChatLoading && (
+                                                    <div className="flex justify-start">
+                                                        <div className="bg-muted p-3 rounded-2xl rounded-tl-none border border-border/20">
+                                                            <div className="flex gap-1">
+                                                                <span className="w-1.5 h-1.5 rounded-full bg-primary/40 animate-bounce" style={{ animationDelay: '0ms' }} />
+                                                                <span className="w-1.5 h-1.5 rounded-full bg-primary/40 animate-bounce" style={{ animationDelay: '200ms' }} />
+                                                                <span className="w-1.5 h-1.5 rounded-full bg-primary/40 animate-bounce" style={{ animationDelay: '400ms' }} />
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {/* Input */}
+                                            <div className="p-4 pt-2 border-t border-border/40 bg-card shrink-0">
+                                                <div className="flex items-center gap-2">
+                                                    <input
+                                                        type="text"
+                                                        value={chatInput}
+                                                        onChange={(e) => setChatInput(e.target.value)}
+                                                        onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                                                        placeholder="Ask a question..."
+                                                        disabled={isChatLoading}
+                                                        className="flex-1 bg-muted/50 border border-border/40 rounded-xl px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition-all disabled:opacity-50"
+                                                    />
+                                                    <button
+                                                        onClick={handleSendMessage}
+                                                        disabled={!chatInput.trim() || isChatLoading}
+                                                        className="shrink-0 w-10 h-10 bg-primary text-white rounded-xl flex items-center justify-center hover:opacity-90 transition-opacity disabled:opacity-30"
+                                                    >
+                                                        <Send className="w-4 h-4" />
+                                                    </button>
+                                                </div>
+                                                <p className="text-[10px] text-center text-muted-foreground mt-2">AI can make mistakes. Verify important info.</p>
+                                            </div>
+                                        </motion.div>
                                     )}
-                                >
-                                    {isChatOpen ? <X className="w-6 h-6" /> : <MessageCircle className="w-6 h-6" />}
-                                </button>
+                                </AnimatePresence>
+
+                                {/* Toggle Button */}
+                                <div style={{ position: 'relative' }}>
+                                    {!isChatOpen && <span className="absolute inset-0 rounded-full bg-primary animate-ping opacity-25" />}
+                                    <button
+                                        onClick={() => setIsChatOpen(!isChatOpen)}
+                                        style={{ position: 'relative', zIndex: 99999 }}
+                                        className={cn(
+                                            "w-14 h-14 rounded-full flex items-center justify-center shadow-2xl transition-all duration-300 hover:scale-110 active:scale-95",
+                                            isChatOpen ? "bg-muted text-foreground border border-border/40" : "bg-primary text-white border-4 border-background ring-2 ring-primary/20"
+                                        )}
+                                    >
+                                        {isChatOpen ? <X className="w-6 h-6" /> : <MessageCircle className="w-6 h-6" />}
+                                    </button>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                )
-            }
+                    )}
+                </SidebarInset >
+                <SidebarRail />
+            </SidebarProvider >
         </>
     );
 }
