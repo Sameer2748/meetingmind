@@ -86,17 +86,24 @@ class BotService {
         const localProfiles = fs.existsSync(this.sessionsDir) ? fs.readdirSync(this.sessionsDir).filter(f => !f.startsWith('.')) : [];
         const hasProfiles = localProfiles.length > 0;
 
-        // AWS SERVER: ALWAYS pull fresh profiles from S3 to stay in sink with the latest "Golden Sync"
-        // LOCAL MAC: DO NOT pull automatically (so you can start fresh by deleting the folder). 
-        // Use FORCE_SYNC=true if you want to pull from S3 locally.
-        const shouldPull = process.env.SERVER_MODE === 'true' || process.env.FORCE_SYNC === 'true';
-
-        if (shouldPull) {
-            console.log('[BotService] 🔄 Syncing profiles from S3...');
+        // 1. INSTANCE MODE: Just take from S3 and use it. No checks, no local logic.
+        if (process.env.SERVER_MODE === 'true') {
+            console.log('[BotService] 🔄 Instance Mode: Pulling authenticated sessions from S3...');
             await storageService.downloadProfilesFromS3(this.sessionsDir);
-        } else {
-            const profiles = localProfiles.length;
-            console.log(profiles > 0 ? `[BotService] ✓ Using ${profiles} existing local profiles.` : '[BotService] ℹ️ No local profiles found. Starting fresh (UI mode login will trigger S3 sync).');
+        }
+        // 2. LOCAL MODE: Use existing profiles, or pull if forced.
+        else {
+            const localProfiles = fs.existsSync(this.sessionsDir) ? fs.readdirSync(this.sessionsDir).filter(f => !f.startsWith('.')) : [];
+            const hasProfiles = localProfiles.length > 0;
+
+            if (process.env.FORCE_SYNC === 'true') {
+                console.log('[BotService] 🔄 Force Sync: Pulling sessions from S3...');
+                await storageService.downloadProfilesFromS3(this.sessionsDir);
+            } else if (!hasProfiles) {
+                console.log('[BotService] ℹ️ Starting fresh. Login manually to trigger a new Golden Sync to S3.');
+            } else {
+                console.log(`[BotService] ✓ Using ${localProfiles.length} existing local profiles.`);
+            }
         }
 
         for (let i = 0; i < this.poolSize; i++) {
@@ -170,35 +177,40 @@ class BotService {
                 const checkAuth = async () => {
                     try {
                         return await page.evaluate(() => {
-                            // Look for signs of being logged in:
-                            // 1. Google Account circle/avatar
-                            // 2. "Logged in as" tooltips
-                            // 3. The presence of the "Start a meeting" button which only appears when AUTHENTICATED
-                            const hasAvatar = !!document.querySelector('[aria-label*="Google Account"], img[src*="googleusercontent.com"]');
-                            const hasLogout = Array.from(document.querySelectorAll('a, button')).some(el =>
-                                (el.innerText || '').includes('Sign out') || (el.getAttribute('aria-label') || '').includes('Sign out')
-                            );
-                            const hasMeetingControls = !!document.querySelector('[data-is-muted]'); // Meeting control bar usually indicates inside or ready
+                            const isLoginPage = window.location.hostname.includes('accounts.google.com');
+                            if (isLoginPage) return false;
 
-                            return hasAvatar || hasLogout;
+                            // 1. Check for the Google Account Circle (usually has your initials or picture)
+                            const hasAvatar = !!document.querySelector('a[href*="accounts.google.com/SignOutOptions"], [aria-label*="Google Account"]');
+
+                            // 2. Check for the actual "New meeting" button which only appears when signed in on Meet
+                            const hasMeetingButtons = Array.from(document.querySelectorAll('button')).some(b =>
+                                (b.innerText || '').includes('New meeting') || (b.innerText || '').includes('Join')
+                            );
+
+                            // 3. Check for the "Enter a code" input field
+                            const hasInput = !!document.querySelector('input[placeholder*="code or link"]');
+
+                            // We need a combination of these to be sure we are logged in and ready
+                            return hasAvatar && (hasMeetingButtons || hasInput);
                         });
                     } catch (e) { return false; }
                 };
 
                 let authenticated = await checkAuth();
                 if (!authenticated) {
-                    console.log('[BotService] ⚠️  Authentication NOT detected. Please log in to your Google Account now...');
-                    console.log('[BotService] ℹ️  The bot will wait for you to finish signing in before syncing to S3.');
+                    console.log('[BotService] ⚠️  Authentication NOT detected. Waiting for manual login...');
+                    console.log('[BotService] ℹ️  Please sign in to Google in the browser window.');
 
                     // Wait for manual login (up to 10 mins)
                     for (let i = 0; i < 120; i++) {
                         await new Promise(r => setTimeout(r, 5000));
                         if (await checkAuth()) {
-                            // Double check after 2 seconds to ensure page finished loading session
-                            await new Promise(r => setTimeout(r, 2000));
+                            // Verify stability for 3 seconds
+                            await new Promise(r => setTimeout(r, 3000));
                             if (await checkAuth()) {
                                 authenticated = true;
-                                console.log('[BotService] ✨ Authenticated session detected!');
+                                console.log('[BotService] ✨ Verified: Authenticated session detected!');
                                 break;
                             }
                         }
