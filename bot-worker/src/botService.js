@@ -86,8 +86,11 @@ class BotService {
         const localProfiles = fs.existsSync(this.sessionsDir) ? fs.readdirSync(this.sessionsDir).filter(f => !f.startsWith('.')) : [];
         const hasProfiles = localProfiles.length > 0;
 
-        // Pull from S3 if missing OR if explicitly forced (like a fresh cookie sync)
-        if (process.env.FORCE_SYNC === 'true' || !hasProfiles) {
+        // AWS SERVER: ALWAYS pull fresh profiles from S3 to stay in sink with the latest "Golden Sync"
+        // LOCAL MAC: ONLY pull if missing, so you can login and push new updates to S3.
+        const shouldPull = process.env.SERVER_MODE === 'true' || process.env.FORCE_SYNC === 'true' || !hasProfiles;
+
+        if (shouldPull) {
             console.log('[BotService] 🔄 Syncing profiles from S3...');
             await storageService.downloadProfilesFromS3(this.sessionsDir);
         } else {
