@@ -154,7 +154,7 @@ class StorageService {
             console.log('[StorageService] ✓ Profiles restored from S3');
             return true;
         } catch (err) {
-            console.log('[StorageService] ℹ️ No profile backup found in S3 (or access denied)');
+            console.error('[StorageService] ❌ Failed to download/extract profiles from S3:', err.message);
             return false;
         }
     }
