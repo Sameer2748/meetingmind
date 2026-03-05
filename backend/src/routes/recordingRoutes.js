@@ -66,11 +66,11 @@ router.get('/:id/audio', authenticate, async (req, res) => {
                     'Content-Range': `bytes ${start}-${end}/${fileSize}`,
                     'Accept-Ranges': 'bytes',
                     'Content-Length': (end - start) + 1,
-                    'Content-Type': 'audio/webm',
+                    'Content-Type': 'video/webm',
                 });
                 fs.createReadStream(filePath, { start, end }).pipe(res);
             } else {
-                res.writeHead(200, { 'Content-Length': fileSize, 'Content-Type': 'audio/webm' });
+                res.writeHead(200, { 'Content-Length': fileSize, 'Content-Type': 'video/webm' });
                 fs.createReadStream(filePath).pipe(res);
             }
             return;
