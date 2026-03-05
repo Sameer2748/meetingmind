@@ -148,7 +148,7 @@ class StorageService {
 
             console.log('[StorageService] Extracting profiles...');
             if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
-            await extract(zipPath, { dir: targetDir });
+            await extract(zipPath, { dir: targetDir, overwrite: true });
 
             fs.unlinkSync(zipPath);
             console.log('[StorageService] ✓ Profiles restored from S3');
