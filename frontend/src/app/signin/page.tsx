@@ -126,14 +126,16 @@ export default function SignInPage() {
                     </div>
 
                     <div className="flex justify-center lg:justify-start">
-                        <GoogleLogin
-                            onSuccess={handleGoogleSuccess}
-                            onError={() => toast.error("Google Sign-in failed")}
-                            theme="filled_black"
-                            shape="pill"
-                            size="large"
-                            width="380"
-                        />
+                        <div style={{ colorScheme: "dark" }}>
+                            <GoogleLogin
+                                onSuccess={handleGoogleSuccess}
+                                onError={() => toast.error("Google Sign-in failed")}
+                                theme="filled_black"
+                                shape="pill"
+                                size="large"
+                                width="380"
+                            />
+                        </div>
                     </div>
 
                     <div className="relative">

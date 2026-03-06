@@ -182,3 +182,15 @@
 :root {
   --radius: 0.625rem;
 }
+/* Google Login Button Fix for Dark Mode */
+.dark iframe[src^="https://accounts.google.com"] {
+    color-scheme: dark !important;
+}
+
+.dark div[id^="google-signin-"] {
+    background-color: transparent !important;
+}
+
+.dark div[style*="background-color: rgb(255, 255, 255)"] {
+    background-color: transparent !important;
+}
