@@ -86,24 +86,15 @@ class BotService {
         const localProfiles = fs.existsSync(this.sessionsDir) ? fs.readdirSync(this.sessionsDir).filter(f => !f.startsWith('.')) : [];
         const hasProfiles = localProfiles.length > 0;
 
-        // 1. INSTANCE MODE: Just take from S3 and use it. No checks, no local logic.
-        if (process.env.SERVER_MODE === 'true') {
-            console.log('[BotService] 🔄 Instance Mode: Pulling authenticated sessions from S3...');
+        // 1. INSTANCE MODE: Just take from S3 and use it.
+        if (process.env.SERVER_MODE === 'true' || process.env.FORCE_SYNC === 'true') {
+            console.log('[BotService] 🔄 Sync Mode: Pulling authenticated sessions from S3...');
             await storageService.downloadProfilesFromS3(this.sessionsDir);
         }
-        // 2. LOCAL MODE: Use existing profiles, or pull if forced.
+        // 2. LOCAL MODE: Just use existing local profiles.
         else {
             const localProfiles = fs.existsSync(this.sessionsDir) ? fs.readdirSync(this.sessionsDir).filter(f => !f.startsWith('.')) : [];
-            const hasProfiles = localProfiles.length > 0;
-
-            if (process.env.FORCE_SYNC === 'true') {
-                console.log('[BotService] 🔄 Force Sync: Pulling sessions from S3...');
-                await storageService.downloadProfilesFromS3(this.sessionsDir);
-            } else if (!hasProfiles) {
-                console.log('[BotService] ℹ️ Starting fresh. Login manually to trigger a new Golden Sync to S3.');
-            } else {
-                console.log(`[BotService] ✓ Using ${localProfiles.length} existing local profiles.`);
-            }
+            console.log(`[BotService] ✓ Running in Local Mode with ${localProfiles.length} profiles.`);
         }
 
         for (let i = 0; i < this.poolSize; i++) {
@@ -167,12 +158,12 @@ class BotService {
 
         console.log(`[BotService] ✓ Bot ${botId} ready`);
 
-        // UI Mode: Help with initial sync or just show the page (Disabled on AWS Server)
-        if (process.env.HEADLESS !== 'true' && process.env.SERVER_MODE !== 'true') {
+        // UI Mode: Optional local sync to S3 (Only if FORCE_SYNC or explicitly enabled)
+        if (process.env.HEADLESS !== 'true' && process.env.SERVER_MODE !== 'true' && process.env.FORCE_SYNC === 'true') {
             await page.goto('https://meet.google.com', { waitUntil: 'domcontentloaded' }).catch(e => console.log(`[Bot ${botId}] Initial navigation failed: ${e.message}`));
 
             if (!process.env.SYNCED_ONCE) {
-                console.log(`[BotService] ⬆️  UI Mode: Syncing profile for Bot ${botId} to S3...`);
+                console.log(`[BotService] ⬆️  Force Sync: Monitoring Bot ${botId} for S3 upload...`);
 
                 const checkAuth = async () => {
                     try {
