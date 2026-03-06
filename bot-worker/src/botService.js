@@ -76,6 +76,15 @@ class BotService {
             }
         });
 
+        // Pipe browser console to node console for debugging
+        page.on('console', msg => {
+            const type = msg.type();
+            const text = msg.text();
+            if (text.includes('[MeetingMind]')) {
+                console.log(`[Bot ${botId} Browser] ${text}`);
+            }
+        });
+
         page.__mmBindingsRegistered = true;
     }
 
@@ -112,6 +121,8 @@ class BotService {
             '--disable-infobars',
             '--enable-usermedia-screen-capturing',    // allow getDisplayMedia without dialog
             '--auto-select-desktop-capture-source=Tab', // auto-pick current tab, no picker UI
+            '--use-fake-device-for-media-stream',
+            '--allow-http-screen-capture'
         ];
 
         // Always mute the system audio — the in-browser canvas+audio recorder captures
@@ -411,7 +422,8 @@ class BotService {
                 videoTrack = displayStream.getVideoTracks()[0];
                 console.log('[MeetingMind] ✅ Tab screen capture started');
             } catch (e) {
-                console.warn('[MeetingMind] getDisplayMedia failed, falling back to canvas grid:', e.message);
+                console.warn('[MeetingMind] ❌ getDisplayMedia failed:', e.message);
+                console.warn('[MeetingMind] falling back to canvas grid...');
             }
 
             // ── 2b. FALLBACK: canvas grid of all participant video elements ──────────
