@@ -90,7 +90,7 @@ export default function Home() {
             <div className="relative w-full rounded-3xl overflow-hidden border border-border shadow-2xl shadow-primary/10" style={{ paddingBottom: '56.25%' }}>
               <iframe
                 className="absolute inset-0 w-full h-full"
-                src="https://www.youtube.com/embed/Cps805yI3m0"  
+                src="https://www.youtube.com/embed/hl2RDk9Zr2U"
                 title="MeetingMind Demo"
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                 allowFullScreen
