@@ -209,20 +209,20 @@ export default function Dashboard() {
 
                 </header>
 
-                <div className="p-6 lg:p-10 max-w-[1400px] mx-auto w-full">
-                    <div className="mb-8 flex items-center justify-between">
-                        <h2 className="text-4xl font-black tracking-tighter italic">Meeting Intelligence</h2>
+                <div className="p-4 sm:p-6 lg:p-10 max-w-[1400px] mx-auto w-full">
+                    <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                        <h2 className="text-2xl sm:text-4xl font-black tracking-tighter italic">Meeting Intelligence</h2>
                         <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
                             <PopoverTrigger asChild>
                                 <button
                                     className={cn(
-                                        "inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium border transition-all duration-200 hover:scale-105 active:scale-95",
+                                        "inline-flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-medium border transition-all duration-200 hover:scale-105 active:scale-95 w-fit",
                                         selectedDate
                                             ? "bg-primary text-white border-primary shadow-md shadow-primary/20"
                                             : "bg-card border-border/50 text-muted-foreground hover:border-primary/30 hover:text-foreground shadow-sm"
                                     )}
                                 >
-                                    <CalendarIcon className="w-4 h-4" />
+                                    <CalendarIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                                     <span>{selectedDate ? format(selectedDate, 'MMM dd, yyyy') : 'Filter by date'}</span>
                                     {selectedDate && (
                                         <X
@@ -404,7 +404,7 @@ function RecordingCard({ recording, index, onDelete }: { recording: any; index: 
         >
             <div className="relative bg-card border border-border/50 rounded-[32px] overflow-hidden flex flex-col h-full transition-all duration-300 hover:border-primary/30 hover:shadow-2xl hover:shadow-primary/5 cursor-pointer group/card">
                 {/* Visual Header / Thumbnail */}
-                <div className="h-40 bg-muted/20 relative flex items-center justify-center overflow-hidden border-b border-border/10">
+                <div className="h-32 sm:h-40 bg-muted/20 relative flex items-center justify-center overflow-hidden border-b border-border/10">
                     <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent transition-opacity group-hover/card:opacity-100 opacity-60" />
                     <div className="relative w-16 h-16 rounded-[24px] bg-primary flex items-center justify-center shadow-xl shadow-primary/20 group-hover/card:scale-110 transition-transform duration-500">
                         <Play className={cn("w-7 h-7 text-white fill-current", isPlaying && "hidden")} />
@@ -431,13 +431,13 @@ function RecordingCard({ recording, index, onDelete }: { recording: any; index: 
                     </div>
                 </div>
 
-                <div className="p-6 flex flex-col flex-1">
-                    <div className="flex-1 mb-6">
-                        <h3 className="text-xl font-black text-foreground tracking-tight line-clamp-2 mb-3 group-hover/card:text-primary transition-colors">
+                <div className="p-5 sm:p-6 flex flex-col flex-1">
+                    <div className="flex-1 mb-4 sm:mb-6">
+                        <h3 className="text-lg sm:text-xl font-black text-foreground tracking-tight line-clamp-2 mb-2 sm:mb-3 group-hover/card:text-primary transition-colors">
                             {recording.meeting_url?.split('/').pop() || "Untitled Meeting"}
                         </h3>
 
-                        <div className="flex flex-wrap gap-4">
+                        <div className="flex flex-wrap gap-3 sm:gap-4">
                             <div className="flex items-center gap-2 text-muted-foreground">
                                 <CalendarIcon className="w-3.5 h-3.5" />
                                 <span className="text-[11px] font-bold uppercase tracking-wider">
