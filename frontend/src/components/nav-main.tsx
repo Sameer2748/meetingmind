@@ -36,10 +36,13 @@ export function NavMain({
                   tooltip={item.title}
                   asChild
                   isActive={isActive}
-                  className={`transition-colors ${isActive ? 'bg-white/10 text-text-primary' : 'text-text-muted hover:text-text-secondary hover:bg-white/5'}`}
+                  className={`transition-all duration-200 ${isActive
+                      ? 'bg-sidebar-accent text-sidebar-accent-foreground shadow-sm'
+                      : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
+                    }`}
                 >
                   <Link href={item.url}>
-                    {item.icon && <item.icon className={`size-4 ${isActive ? 'text-button-primary' : ''}`} />}
+                    {item.icon && <item.icon className={`size-4 ${isActive ? 'text-primary' : ''}`} />}
                     <span className="font-medium group-data-[collapsible=icon]:hidden">{item.title}</span>
                   </Link>
                 </SidebarMenuButton>

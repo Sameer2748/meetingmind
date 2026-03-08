@@ -71,6 +71,14 @@
     --accent-foreground: #01114f;
     --border: #d4d2bb;
     --input: #d4d2bb;
+    --sidebar: #ffffff;
+    --sidebar-foreground: #01114f;
+    --sidebar-primary: #e07155;
+    --sidebar-primary-foreground: #ffffff;
+    --sidebar-accent: rgba(224, 113, 85, 0.1);
+    --sidebar-accent-foreground: #e07155;
+    --sidebar-border: #d4d2bb;
+    --sidebar-ring: #e07155;
   }
 
   .dark {
@@ -90,6 +98,14 @@
     --accent-foreground: #ffffff;
     --border: #292a36;
     --input: #292a36;
+    --sidebar: #16171f;
+    --sidebar-foreground: #ffffff;
+    --sidebar-primary: #e07155;
+    --sidebar-primary-foreground: #ffffff;
+    --sidebar-accent: rgba(224, 113, 85, 0.15);
+    --sidebar-accent-foreground: #ffffff;
+    --sidebar-border: #292a36;
+    --sidebar-ring: #e07155;
   }
 
   * {
@@ -182,15 +198,16 @@
 :root {
   --radius: 0.625rem;
 }
+
 /* Google Login Button Fix for Dark Mode */
 .dark iframe[src^="https://accounts.google.com"] {
-    color-scheme: dark !important;
+  color-scheme: dark !important;
 }
 
 .dark div[id^="google-signin-"] {
-    background-color: transparent !important;
+  background-color: transparent !important;
 }
 
 .dark div[style*="background-color: rgb(255, 255, 255)"] {
-    background-color: transparent !important;
+  background-color: transparent !important;
 }

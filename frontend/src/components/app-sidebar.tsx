@@ -62,7 +62,7 @@ export function AppSidebar({ user, ...props }: any) {
     };
 
     return (
-        <Sidebar collapsible="icon" className="border-r border-border/50 bg-background/80 backdrop-blur-xl pt-2" {...props}>
+        <Sidebar collapsible="icon" className="border-r border-sidebar-border bg-sidebar pt-2" {...props}>
             <SidebarHeader>
                 <SidebarMenu>
                     <SidebarMenuItem>
@@ -72,7 +72,7 @@ export function AppSidebar({ user, ...props }: any) {
                         >
                             <a href="/dashboard" className="flex items-center gap-3">
                                 <Logo className="w-8 h-8 shrink-0" />
-                                <span className="text-lg font-bold tracking-tight group-data-[collapsible=icon]:hidden">MeetingMind</span>
+                                <span className="text-lg font-bold tracking-tight text-sidebar-foreground group-data-[collapsible=icon]:hidden">MeetingMind</span>
                             </a>
                         </SidebarMenuButton>
                     </SidebarMenuItem>
@@ -87,10 +87,10 @@ export function AppSidebar({ user, ...props }: any) {
                             <SidebarMenuButton
                                 onClick={toggleTheme}
                                 tooltip="Toggle Theme"
-                                className="bg-muted/50 border border-border/10 rounded-xl hover:bg-primary/10 hover:text-primary transition-all py-6 group-data-[collapsible=icon]:py-2"
+                                className="bg-sidebar-accent/50 border border-sidebar-border rounded-xl hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-all py-6 group-data-[collapsible=icon]:py-2"
                             >
                                 {theme === 'dark' ? <SunIcon className="size-4 text-primary" /> : <MoonIcon className="size-4 text-primary" />}
-                                <span className="font-medium group-data-[collapsible=icon]:hidden">{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
+                                <span className="font-medium text-sidebar-foreground group-data-[collapsible=icon]:hidden">{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
                             </SidebarMenuButton>
                         </SidebarMenuItem>
                     </SidebarMenu>
