@@ -454,7 +454,7 @@ export default function SharedRecordingPage() {
             </header>
 
             <div className="w-full bg-background py-8 lg:py-12 border-b border-border/40">
-                <div className="max-w-[1400px] mx-auto px-6 lg:px-10">
+                <div className="max-w-[1000px] mx-auto px-6 lg:px-10">
                     <div
                         ref={playerContainerRef}
                         onMouseMove={handlePlayerMouseMove}
