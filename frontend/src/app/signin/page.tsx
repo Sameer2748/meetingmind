@@ -140,7 +140,10 @@ function SignInContent() {
                     </div>
 
                     <div className="flex justify-center lg:justify-start">
-                        <div style={{ colorScheme: "dark" }}>
+                        <div
+                            style={{ colorScheme: "dark", width: `${googleButtonWidth}px`, height: "40px" }}
+                            className="rounded-full overflow-hidden flex items-center justify-center bg-[#131314] mx-auto lg:mx-0 shadow-sm"
+                        >
                             <GoogleLogin
                                 onSuccess={handleGoogleSuccess}
                                 onError={() => toast.error("Google Sign-in failed")}
