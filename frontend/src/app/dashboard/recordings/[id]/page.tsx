@@ -27,14 +27,16 @@ import {
     Maximize,
     VolumeX,
     Volume1,
-    ArrowRight
+    ArrowRight,
+    Copy
 } from "lucide-react";
 import { SidebarProvider, SidebarInset, SidebarRail } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { tokenManager } from "@/lib/auth/tokenManager";
-import { recordingsAPI } from "@/lib/api";
+import { recordingsAPI, authAPI } from "@/lib/api";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 
 // ─── Audio Visualizer ────────────────────────────────────────────────────────
@@ -242,6 +244,10 @@ export default function RecordingDetails() {
     const chatContainerRef = useRef<HTMLDivElement>(null);
     const [mounted, setMounted] = useState(false);
 
+    // Share State
+    const [showShareModal, setShowShareModal] = useState(false);
+    const [shareConfig, setShareConfig] = useState({ days: 0, hours: 24, seconds: 0 });
+
     useEffect(() => { setMounted(true); }, []);
 
     // Load chat history from localStorage
@@ -284,10 +290,16 @@ export default function RecordingDetails() {
             avatar: "/avatars/user.jpg"
         });
 
-        const fetchRecording = async () => {
+        const fetchData = async () => {
             try {
-                const data = await recordingsAPI.getRecordings();
-                const found = data.find((r: any) => r.id === parseInt(id as string));
+                const [recordingsData, statusData] = await Promise.all([
+                    recordingsAPI.getRecordings(),
+                    authAPI.getStatus()
+                ]);
+
+                setUser((prev: any) => ({ ...prev, plan: statusData.plan }));
+
+                const found = recordingsData.find((r: any) => r.id === parseInt(id as string));
                 if (found) {
                     setRecording(found);
                     if (found.duration) setDuration(found.duration);
@@ -308,7 +320,7 @@ export default function RecordingDetails() {
             }
         };
 
-        fetchRecording();
+        fetchData();
     }, [id, router]);
 
     const togglePlay = () => {
@@ -560,8 +572,8 @@ export default function RecordingDetails() {
         <>
             <SidebarProvider className="flex w-full min-h-screen">
                 <AppSidebar user={user} />
-                <SidebarInset className="bg-background flex-1 min-w-0 flex flex-col overflow-y-auto h-screen">
-                    <header className="sticky top-0 z-[200] flex h-16 shrink-0 items-center gap-4 border-b border-white/5 bg-black/50 backdrop-blur-xl px-6" style={{ position: "sticky", top: 0 }}>
+                <SidebarInset className="bg-background flex-1 min-w-0 flex flex-col overflow-y-auto h-screen relative">
+                    <header className="sticky top-0 z-[1001] flex h-16 shrink-0 items-center gap-4 border-b border-border/40 bg-background/80 backdrop-blur-xl px-6">
                         <button
                             onClick={() => router.back()}
                             className="p-2 hover:bg-white/10 rounded-full transition-colors text-white/70 hover:text-white"
@@ -569,23 +581,22 @@ export default function RecordingDetails() {
                             <ChevronLeft className="w-5 h-5" />
                         </button>
                         <div className="flex flex-col">
-                            <h1 className="text-sm font-bold tracking-tight text-white/90">
+                            <h1 className="text-sm font-bold tracking-tight text-foreground">
                                 {recording.meeting_url.split('/').pop() || "Untitled Meeting"}
                             </h1>
                             <span className="text-[10px] uppercase tracking-widest text-primary font-black">
-                                Cinema Mode
+                                Session Review
                             </span>
                         </div>
 
-                        {/* Session Metadata Badges */}
-                        <div className="hidden xl:flex items-center gap-5 ml-8 pl-8 border-l border-white/10 text-white/50">
-                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/5 border border-white/5">
+                        <div className="hidden xl:flex items-center gap-5 ml-8 pl-8 border-l border-border/40 text-muted-foreground">
+                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-muted border border-border/40">
                                 <Clock className="w-3.5 h-3.5 text-primary" />
-                                <span className="text-[11px] font-bold tabular-nums text-white/80">{formatTime(duration)}</span>
+                                <span className="text-[11px] font-bold tabular-nums text-foreground">{formatTime(duration)}</span>
                             </div>
-                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/5 border border-white/5">
+                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-muted border border-border/40">
                                 <Calendar className="w-3.5 h-3.5 text-primary" />
-                                <span className="text-[11px] font-bold text-white/80">{format(new Date(recording.created_at), 'MMM dd, yyyy')}</span>
+                                <span className="text-[11px] font-bold text-foreground">{format(new Date(recording.created_at), 'MMM dd, yyyy')}</span>
                             </div>
                             <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-primary/10 border border-primary/20">
                                 <div className="flex -space-x-1 mr-2">
@@ -600,9 +611,17 @@ export default function RecordingDetails() {
                         </div>
 
                         <div className="ml-auto flex items-center gap-2">
-                            <button className="hidden sm:flex items-center gap-2 px-4 py-2 hover:bg-white/10 rounded-xl text-xs font-bold transition-all border border-white/10 text-white/70 hover:text-white">
-                                <Share2 className="w-4 h-4" /> Share
-                            </button>
+                            {/* Share Button & Modal */}
+                            <div className="relative">
+                                <button
+                                    onClick={() => setShowShareModal(!showShareModal)}
+                                    className="hidden sm:flex items-center gap-2 px-4 py-2 bg-muted hover:bg-muted/80 rounded-xl text-xs font-bold transition-all border border-border/40 text-foreground"
+                                >
+                                    <Share2 className="w-4 h-4" />
+                                    {recording.share_expires_at && new Date(recording.share_expires_at) > new Date() ? "Shared" : "Share"}
+                                </button>
+                            </div>
+
                             <a
                                 href={`${process.env.NEXT_PUBLIC_API_URL || 'https://meetingmind-backend.100xsam.live'}/api/recordings/${id}/audio?token=${tokenManager.getToken()}`}
                                 download={`meeting-${id}.webm`}
@@ -613,7 +632,7 @@ export default function RecordingDetails() {
                         </div>
                     </header>
 
-                    <div className="w-full bg-[#050505] dark:bg-[#0c0c0e] py-12 lg:py-20 border-b border-white/5">
+                    <div className="w-full bg-background py-8 lg:py-12 border-b border-border/40">
                         <div className="max-w-[1400px] mx-auto px-6 lg:px-10">
                             {/* Video player: spacer div creates 16:9 height, fill div uses flex to push controls to bottom */}
                             {/* Outer wrapper — position:relative is the containing block for all absolute children */}
@@ -627,6 +646,7 @@ export default function RecordingDetails() {
                                     paddingBottom: '56.25%',
                                     background: '#000',
                                     borderRadius: '40px',
+                                    zIndex: 0,
                                     border: '1px solid rgba(255,255,255,0.05)',
                                     boxShadow: '0 0 100px rgba(0,0,0,0.5)',
                                     cursor: showControls ? 'default' : 'none',
@@ -766,9 +786,9 @@ export default function RecordingDetails() {
                                     )}
                                 </div>
 
-                                <div className="bg-white/50 dark:bg-[#0f0f12]/50 backdrop-blur-3xl border border-black/5 dark:border-white/5 rounded-[48px] p-8 lg:p-14 leading-relaxed shadow-xl">
+                                <div className="bg-card/30 dark:bg-card/50 backdrop-blur-3xl border border-border/40 rounded-[48px] p-8 lg:p-14 leading-relaxed shadow-xl">
                                     {recording.transcript_text ? (
-                                        <div className="space-y-12">
+                                        <div className="space-y-4">
                                             {parsedTranscript.map((utterance, i) => {
                                                 const colors = [
                                                     'bg-primary/10 text-primary',
@@ -784,7 +804,7 @@ export default function RecordingDetails() {
 
                                                 return (
                                                     <div key={i} className="group/para">
-                                                        <div className="flex items-center gap-4 mb-4">
+                                                        <div className="flex items-center gap-4 mb-2">
                                                             <div className={`w-10 h-10 rounded-xl ${colors[speakerIdx]} flex items-center justify-center text-[11px] font-black shadow-sm`}>
                                                                 S{utterance.speaker}
                                                             </div>
@@ -795,7 +815,7 @@ export default function RecordingDetails() {
                                                                 SPEAKER {utterance.speaker} &nbsp;•&nbsp; {utterance.time}
                                                             </button>
                                                         </div>
-                                                        <p className="text-xl font-medium leading-[1.8] text-foreground/90">
+                                                        <p className="text-lg font-medium leading-[1.6] text-foreground/90">
                                                             {syncEnabled && utteranceWords ? (
                                                                 utteranceWords.map((w, wi) => {
                                                                     const isPlayed = currentTime >= w.end && w.end > 0;
@@ -845,7 +865,7 @@ export default function RecordingDetails() {
                     </div>{/* closes w-full bg-[#050505] section */}
 
                     {/* AI Chat Assistant */}
-                    {mounted && (
+                    {mounted && user?.plan === 'pro' && (
                         <div style={{ position: 'fixed', bottom: '2rem', right: '2rem', zIndex: 99999, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', pointerEvents: 'none' }}>
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', pointerEvents: 'auto' }}>
                                 <AnimatePresence>
@@ -955,6 +975,121 @@ export default function RecordingDetails() {
                 </SidebarInset >
                 <SidebarRail />
             </SidebarProvider >
+
+            {/* Fixed Share Modal Overlay */}
+            <AnimatePresence>
+                {showShareModal && (
+                    <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4">
+                        <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            onClick={() => setShowShareModal(false)}
+                            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                        />
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                            className="relative w-full max-w-sm bg-card border border-border/40 rounded-[32px] shadow-2xl p-8 overflow-hidden"
+                        >
+                            <div className="flex items-center justify-between mb-8">
+                                <div>
+                                    <h4 className="text-sm font-black uppercase tracking-widest text-primary">Share Session</h4>
+                                    <p className="text-[10px] text-muted-foreground mt-1 uppercase font-bold tracking-tight">Create a public viewing link</p>
+                                </div>
+                                <button onClick={() => setShowShareModal(false)} className="p-2 hover:bg-muted rounded-full transition-colors">
+                                    <X className="w-5 h-5" />
+                                </button>
+                            </div>
+
+                            {recording.share_token && new Date(recording.share_expires_at) > new Date() ? (
+                                <div className="space-y-6">
+                                    <div className="p-5 bg-primary/5 border border-primary/20 rounded-[20px]">
+                                        <div className="text-[10px] uppercase font-black text-primary/60 mb-1">Expires In</div>
+                                        <div className="text-sm font-bold">
+                                            {Math.ceil((new Date(recording.share_expires_at).getTime() - new Date().getTime()) / 3600000)} hours remaining
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-3 p-3 bg-muted rounded-[20px] border border-border/20">
+                                        <input
+                                            readOnly
+                                            value={`${window.location.origin}/share/${recording.share_token}`}
+                                            className="bg-transparent text-xs font-mono flex-1 outline-none px-2"
+                                        />
+                                        <button
+                                            onClick={() => {
+                                                navigator.clipboard.writeText(`${window.location.origin}/share/${recording.share_token}`);
+                                                toast.success("Link copied!");
+                                            }}
+                                            className="w-10 h-10 shrink-0 bg-primary text-white rounded-full flex items-center justify-center hover:bg-primary/90 transition-all shadow-lg shadow-primary/20"
+                                        >
+                                            <Copy className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                    <button
+                                        onClick={() => setRecording({ ...recording, share_expires_at: null })}
+                                        className="w-full py-4 bg-muted hover:bg-red-500/10 hover:text-red-500 rounded-full text-[10px] font-black uppercase tracking-widest transition-all"
+                                    >
+                                        Revoke or Extend Link
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="space-y-8">
+                                    <div className="grid grid-cols-3 gap-3">
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1">Days</label>
+                                            <select
+                                                value={shareConfig.days}
+                                                onChange={(e) => setShareConfig({ ...shareConfig, days: parseInt(e.target.value) })}
+                                                className="w-full bg-muted border border-border/40 rounded-2xl px-4 py-3 text-sm font-bold outline-none focus:border-primary/40 transition-colors appearance-none"
+                                            >
+                                                {[0, 1, 2, 3, 7, 30].map(d => <option key={d} value={d}>{d}d</option>)}
+                                            </select>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1">Hours</label>
+                                            <select
+                                                value={shareConfig.hours}
+                                                onChange={(e) => setShareConfig({ ...shareConfig, hours: parseInt(e.target.value) })}
+                                                className="w-full bg-muted border border-border/40 rounded-2xl px-4 py-3 text-sm font-bold outline-none focus:border-primary/40 transition-colors appearance-none"
+                                            >
+                                                {[0, 1, 2, 6, 12, 24].map(h => <option key={h} value={h}>{h}h</option>)}
+                                            </select>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-black uppercase tracking-widest opacity-40 ml-1">Sec</label>
+                                            <select
+                                                value={shareConfig.seconds}
+                                                onChange={(e) => setShareConfig({ ...shareConfig, seconds: parseInt(e.target.value) })}
+                                                className="w-full bg-muted border border-border/40 rounded-2xl px-4 py-3 text-sm font-bold outline-none focus:border-primary/40 transition-colors appearance-none"
+                                            >
+                                                {[0, 30, 60].map(s => <option key={s} value={s}>{s}s</option>)}
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <button
+                                        onClick={async () => {
+                                            try {
+                                                toast.info("Generating share link...");
+                                                const res = await recordingsAPI.shareRecording(parseInt(id as string), shareConfig);
+                                                setRecording({ ...recording, share_token: res.share_token, share_expires_at: res.expires_at });
+                                                toast.success("Recording shared successfully!");
+                                            } catch (err) {
+                                                toast.error("Failed to share recording");
+                                            }
+                                        }}
+                                        className="w-full py-6 bg-primary text-white rounded-full text-xs font-black uppercase tracking-widest shadow-xl shadow-primary/30 hover:scale-[1.01] active:scale-[0.99] transition-all"
+                                    >
+                                        Create Public Link
+                                    </button>
+                                </div>
+                            )}
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
         </>
     );
 }

@@ -29,7 +29,9 @@ export function NavMain({
       <SidebarGroupContent className="flex flex-col gap-2 px-1.5">
         <SidebarMenu className="gap-1 mt-2">
           {items.map((item) => {
-            const isActive = pathname.startsWith(item.url)
+            const isActive = item.url === '/dashboard'
+              ? pathname === '/dashboard'
+              : pathname.startsWith(item.url)
             return (
               <SidebarMenuItem key={item.title}>
                 <SidebarMenuButton
@@ -37,8 +39,8 @@ export function NavMain({
                   asChild
                   isActive={isActive}
                   className={`transition-all duration-200 ${isActive
-                      ? 'bg-sidebar-accent text-sidebar-accent-foreground shadow-sm'
-                      : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
+                    ? 'bg-sidebar-accent text-sidebar-accent-foreground shadow-sm'
+                    : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
                     }`}
                 >
                   <Link href={item.url}>

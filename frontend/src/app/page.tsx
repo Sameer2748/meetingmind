@@ -3,10 +3,11 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { Brain, Camera, MessageSquare, Zap, Bot, Cloud, Menu, X, Github } from "lucide-react";
+import { Brain, Camera, MessageSquare, Zap, Bot, Cloud, Menu, X, Github, Check, Sparkles } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { tokenManager } from "@/lib/auth/tokenManager";
 import { useRouter } from "next/navigation";
+import { cn } from "@/lib/utils";
 
 export default function Home() {
   const router = useRouter();
@@ -17,6 +18,20 @@ export default function Home() {
       router.replace("/dashboard");
     }
   }, [router]);
+
+  const handleBuy = (planId: string) => {
+    const targetUrl = `/dashboard?buy=${planId}`;
+    if (!tokenManager.isAuthenticated()) {
+      router.push(`/signin?callbackUrl=${encodeURIComponent(targetUrl)}`);
+    } else {
+      router.push(targetUrl);
+    }
+  };
+
+  const scrollToPricing = () => {
+    const pricing = document.getElementById('pricing');
+    if (pricing) pricing.scrollIntoView({ behavior: 'smooth' });
+  };
 
   return (
     <div className="min-h-screen flex flex-col bg-background selection:bg-primary/30">
@@ -38,6 +53,16 @@ export default function Home() {
           >
             <Github className="w-5 h-5" />
           </a>
+          {/* Desktop Nav Links */}
+          <div className="hidden md:flex items-center gap-8 mr-8">
+            <button onClick={scrollToPricing} className="text-sm font-medium text-muted-foreground hover:text-primary transition-colors">
+              Pricing
+            </button>
+            <Link href="/" className="text-sm font-medium text-muted-foreground hover:text-primary transition-colors">
+              Features
+            </Link>
+          </div>
+
           <ThemeToggle />
 
           {/* Desktop Nav */}
@@ -73,6 +98,12 @@ export default function Home() {
             exit={{ opacity: 0, y: -20 }}
             className="fixed top-[72px] left-0 w-full z-40 md:hidden glass-effect border-b border-white/10 p-6 flex flex-col gap-4 shadow-2xl"
           >
+            <button
+              onClick={() => { setIsMenuOpen(false); scrollToPricing(); }}
+              className="text-lg font-bold py-3 px-4 rounded-2xl hover:bg-primary/10 hover:text-primary transition-all text-center"
+            >
+              Pricing
+            </button>
             <Link
               href="/signin"
               onClick={() => setIsMenuOpen(false)}
@@ -119,12 +150,12 @@ export default function Home() {
               >
                 Start Recording Free <Zap className="w-5 h-5 fill-current" />
               </Link>
-              <Link
-                href="/signin"
+              <button
+                onClick={scrollToPricing}
                 className="w-full sm:w-auto glass-effect px-8 sm:px-10 py-4 rounded-full text-base sm:text-lg font-bold hover:bg-white/10 transition-all border border-white/20 flex items-center justify-center"
               >
-                Sign In
-              </Link>
+                View Plans
+              </button>
             </div>
           </motion.div>
 
@@ -223,6 +254,109 @@ export default function Home() {
               </Link>
             </div>
           </motion.div>
+
+          {/* Pricing Section */}
+          <section id="pricing" className="mt-40 mb-20 w-full max-w-6xl mx-auto px-4">
+            <div className="text-center mb-16">
+              <h2 className="text-4xl sm:text-5xl font-black mb-4">Simple, Transparent <span className="text-primary italic">Pricing</span></h2>
+              <p className="text-muted-foreground text-lg sm:text-xl max-w-2xl mx-auto">
+                Whether you're a solo pro or a global team, we have a plan that fits your growth.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+              {[
+                {
+                  id: "starter",
+                  name: "Starter",
+                  price: "0",
+                  description: "For individuals just getting started with AI meeting assistance.",
+                  features: ["5 Meetings / month", "Cloud recording (720p)", "Basic AI Transcripts", "Community Support", "1 month storage"],
+                  buttonText: "Join for Free",
+                  popular: false
+                },
+                {
+                  id: "pro",
+                  name: "Pro",
+                  price: "1",
+                  description: "For professionals who need unlimited high-fidelity recording.",
+                  features: ["Unlimited Meetings", "Full HD 1080p recording", "Advanced Multilingual AI", "Priority Email Support", "Lifetime storage"],
+                  buttonText: "Go Pro Now",
+                  popular: true
+                },
+                {
+                  id: "enterprise",
+                  name: "Enterprise",
+                  price: "49",
+                  description: "For teams requiring custom branding and priority security.",
+                  features: ["Team Workspaces", "Custom Bot Name & Avatar", "API Access", "Dedicated Success Manager", "SAML SSO Auth"],
+                  buttonText: "Scale Up",
+                  popular: false
+                }
+              ].map((plan) => (
+                <div
+                  key={plan.id}
+                  className={cn(
+                    "relative flex flex-col p-8 rounded-[40px] border transition-all duration-500 hover:translate-y-[-8px]",
+                    plan.popular
+                      ? "bg-primary text-white border-primary shadow-2xl shadow-primary/30 scale-105 z-10"
+                      : "bg-card border-border hover:border-primary/50"
+                  )}
+                >
+                  {plan.popular && (
+                    <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white text-primary text-[10px] font-black uppercase tracking-widest px-4 py-1.5 rounded-full shadow-xl">
+                      Most Popular
+                    </div>
+                  )}
+
+                  <div className="mb-8">
+                    <h3 className={cn("text-2xl font-black mb-2", plan.popular ? "text-white" : "text-foreground")}>{plan.name}</h3>
+                    <div className="flex items-baseline gap-1 mb-4">
+                      <span className="text-4xl font-black">${plan.price}</span>
+                      <span className={cn("text-sm font-medium", plan.popular ? "text-white/80" : "text-muted-foreground")}>/month</span>
+                    </div>
+                    <p className={cn("text-sm leading-relaxed", plan.popular ? "text-white/80" : "text-muted-foreground")}>
+                      {plan.description}
+                    </p>
+                  </div>
+
+                  <div className="space-y-4 mb-10 flex-1">
+                    {plan.features.map((feature, idx) => (
+                      <div key={idx} className="flex items-center gap-3">
+                        <Check className={cn("w-5 h-5", plan.popular ? "text-white" : "text-primary")} />
+                        <span className={cn("text-sm font-medium", plan.popular ? "text-white/90" : "text-foreground/90")}>{feature}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={() => handleBuy(plan.id)}
+                    className={cn(
+                      "w-full py-4 rounded-2xl font-black text-lg transition-all shadow-lg",
+                      plan.popular
+                        ? "bg-white text-primary hover:bg-white/90 hover:shadow-xl"
+                        : "bg-primary text-white hover:bg-primary/90 hover:shadow-primary/20"
+                    )}
+                  >
+                    {plan.buttonText}
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-20 text-center glass-effect p-12 rounded-[50px] border border-white/10 relative overflow-hidden group">
+              <div className="absolute top-0 right-0 p-4 opacity-20 transition-transform duration-700 group-hover:rotate-12">
+                <Sparkles className="w-32 h-32 text-primary" />
+              </div>
+              <h3 className="text-3xl font-black mb-4">Enterprise Needs?</h3>
+              <p className="text-muted-foreground max-w-xl mx-auto mb-8">
+                Looking for white-labeled solutions, on-premise deployments, or custom volume agreements? Let's talk about it.
+              </p>
+              <button className="bg-foreground text-background px-10 py-4 rounded-full font-black text-lg hover:bg-foreground/90 transition-all">
+                Contact Sales
+              </button>
+            </div>
+          </section>
         </div>
       </main>
 

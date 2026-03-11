@@ -20,6 +20,29 @@ export const authAPI = {
         const res = await apiClient.post('/api/auth/login', { email });
         return res.data;
     },
+    upgrade: async (email: string, plan: string) => {
+        const res = await apiClient.post('/api/auth/upgrade', { email, plan });
+        return res.data;
+    },
+    getStatus: async () => {
+        const res = await apiClient.get('/api/auth/status');
+        return res.data;
+    }
+};
+
+export const paymentAPI = {
+    createOrder: async (planId: string) => {
+        const res = await apiClient.post('/api/payments/create-order', { planId });
+        return res.data;
+    },
+    verifyPayment: async (paymentData: any) => {
+        const res = await apiClient.post('/api/payments/verify-payment', paymentData);
+        return res.data;
+    },
+    getPayments: async () => {
+        const res = await apiClient.get('/api/payments/history');
+        return res.data;
+    }
 };
 
 export const recordingsAPI = {
@@ -29,6 +52,14 @@ export const recordingsAPI = {
     },
     deleteRecording: async (id: number) => {
         const res = await apiClient.delete(`/api/recordings/${id}`);
+        return res.data;
+    },
+    shareRecording: async (id: number, data: { days: number, hours: number, seconds: number }) => {
+        const res = await apiClient.post(`/api/recordings/${id}/share`, data);
+        return res.data;
+    },
+    getSharedRecording: async (token: string) => {
+        const res = await apiClient.get(`/api/recordings/shared/${token}`);
         return res.data;
     },
     chat: async (id: number, message: string, history: any[] = []) => {

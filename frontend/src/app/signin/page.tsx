@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { GoogleLogin } from "@react-oauth/google";
 import { toast } from "sonner";
@@ -18,7 +18,19 @@ export default function SignInPage() {
     const [password, setPassword] = useState("");
     const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [googleButtonWidth, setGoogleButtonWidth] = useState<string>("380");
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const callbackUrl = searchParams.get("callbackUrl") || "/dashboard";
+
+    useEffect(() => {
+        const updateWidth = () => {
+            setGoogleButtonWidth(window.innerWidth < 480 ? "300" : "380");
+        };
+        updateWidth();
+        window.addEventListener('resize', updateWidth);
+        return () => window.removeEventListener('resize', updateWidth);
+    }, []);
 
     const handleSignIn = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -36,9 +48,9 @@ export default function SignInPage() {
             if (data.success) {
                 tokenManager.setToken(data.token);
                 toast.success("Welcome back to MeetingMind!");
-                console.log("[Auth] Redirecting to /dashboard...");
-                // Force a full reload to the dashboard to avoid SPA routing issues
-                window.location.href = "/dashboard";
+                console.log("[Auth] Redirecting to:", callbackUrl);
+                // Force a full reload to the target page
+                window.location.href = callbackUrl;
             }
         } catch (err: any) {
             console.error("[Auth] Login error:", err);
@@ -60,7 +72,7 @@ export default function SignInPage() {
                 if (data.success) {
                     tokenManager.setToken(data.token);
                     toast.success("Signed in with Google!");
-                    window.location.href = "/dashboard";
+                    window.location.href = callbackUrl;
                 }
             }
         } catch (err) {
@@ -70,16 +82,19 @@ export default function SignInPage() {
     };
 
     return (
-        <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6 bg-[radial-gradient(circle_at_bottom_left,_rgba(224,113,85,0.15)_0%,_transparent_40%)]">
-            <Link
-                href="/"
-                className="absolute top-10 left-10 flex items-center gap-2 text-muted-foreground hover:text-primary transition-colors font-medium"
-            >
-                <ArrowLeft className="w-4 h-4" /> Back to home
-            </Link>
+        <div className="min-h-screen bg-background flex flex-col items-center pt-28 pb-12 lg:pt-0 lg:justify-center p-6 bg-[radial-gradient(circle_at_bottom_left,_rgba(224,113,85,0.15)_0%,_transparent_40%)]">
+            {/* Top Navigation Bar */}
+            <div className="fixed top-0 left-0 right-0 p-6 md:p-10 flex items-center justify-between z-[100] pointer-events-none">
+                <Link
+                    href="/"
+                    className="flex items-center gap-2 text-muted-foreground hover:text-primary transition-colors font-medium pointer-events-auto"
+                >
+                    <ArrowLeft className="w-4 h-4" /> <span className="hidden sm:inline">Back to home</span>
+                </Link>
 
-            <div className="absolute top-10 right-10">
-                <ThemeToggle />
+                <div className="pointer-events-auto">
+                    <ThemeToggle />
+                </div>
             </div>
 
             <div className="w-full max-w-[1000px] grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
@@ -114,11 +129,10 @@ export default function SignInPage() {
                     </div>
                 </motion.div>
 
-                {/* Right Side: Form */}
                 <motion.div
                     initial={{ opacity: 0, x: 30 }}
                     animate={{ opacity: 1, x: 0 }}
-                    className="w-full max-w-[460px] glass-effect p-10 rounded-[40px] shadow-2xl space-y-8 mx-auto"
+                    className="w-full max-w-[480px] lg:max-w-[460px] glass-effect p-6 sm:p-10 rounded-[32px] sm:rounded-[40px] shadow-2xl space-y-6 sm:space-y-8 mx-auto"
                 >
                     <div className="text-center lg:text-left">
                         <h1 className="text-3xl font-black tracking-tight mb-2">Welcome Back</h1>
@@ -133,7 +147,7 @@ export default function SignInPage() {
                                 theme="filled_black"
                                 shape="pill"
                                 size="large"
-                                width="380"
+                                width={googleButtonWidth}
                             />
                         </div>
                     </div>
@@ -147,7 +161,7 @@ export default function SignInPage() {
                         </div>
                     </div>
 
-                    <form onSubmit={handleSignIn} className="space-y-5">
+                    <form onSubmit={handleSignIn} className="space-y-4 sm:space-y-5">
                         <div className="space-y-2">
                             <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground ml-1">Email Address</label>
                             <input
@@ -155,7 +169,7 @@ export default function SignInPage() {
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
                                 placeholder="name@company.com"
-                                className="w-full bg-muted/30 border border-border focus:border-primary px-5 py-4 rounded-2xl outline-none transition-all focus:ring-4 focus:ring-primary/10"
+                                className="w-full bg-muted/30 border border-border focus:border-primary px-4 py-3 rounded-2xl outline-none transition-all focus:ring-4 focus:ring-primary/10"
                             />
                         </div>
 
@@ -167,7 +181,7 @@ export default function SignInPage() {
                                     value={password}
                                     onChange={(e) => setPassword(e.target.value)}
                                     placeholder="••••••••"
-                                    className="w-full bg-muted/30 border border-border focus:border-primary px-5 py-4 rounded-2xl outline-none transition-all focus:ring-4 focus:ring-primary/10"
+                                    className="w-full bg-muted/30 border border-border focus:border-primary px-4 py-3 rounded-2xl outline-none transition-all focus:ring-4 focus:ring-primary/10"
                                 />
                                 <button
                                     type="button"
@@ -183,7 +197,7 @@ export default function SignInPage() {
                             type="submit"
                             disabled={loading}
                             className={cn(
-                                "w-full bg-primary text-white py-4 rounded-2xl font-black text-lg transition-all hover:translate-y-[-2px] hover:shadow-xl hover:shadow-primary/20",
+                                "w-full bg-primary text-white py-3 rounded-2xl font-black text-lg transition-all hover:translate-y-[-2px] hover:shadow-xl hover:shadow-primary/20",
                                 loading && "opacity-70 cursor-not-allowed"
                             )}
                         >

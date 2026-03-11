@@ -35,13 +35,15 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { tokenManager } from "@/lib/auth/tokenManager";
-import { recordingsAPI } from "@/lib/api";
+import { recordingsAPI, authAPI, paymentAPI } from "@/lib/api";
 import { format, isSameDay } from "date-fns";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useSearchParams } from "next/navigation";
+import { Check, Sparkles, CreditCard, ShieldCheck } from "lucide-react";
 
 // ─── Compact Waveform Seek Bar for Dashboard Cards ─────────────────────────────
 
@@ -131,7 +133,25 @@ export default function Dashboard() {
     const [deleteConfirmText, setDeleteConfirmText] = useState("");
     const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
     const [calendarOpen, setCalendarOpen] = useState(false);
+    const [checkoutOpen, setCheckoutOpen] = useState(false);
+    const searchParams = useSearchParams();
     const router = useRouter();
+
+    const selectedPlanId = searchParams.get("buy");
+
+    useEffect(() => {
+        if (selectedPlanId) {
+            setCheckoutOpen(true);
+        }
+    }, [selectedPlanId]);
+
+    const PLANS: Record<string, any> = {
+        starter: { name: "Starter", price: "0", features: ["5 Meetings / mo", "720p Cloud recording", "Basic AI Transcripts"] },
+        pro: { name: "Pro", price: "5", features: ["Unlimited Meetings", "Full HD 1080p", "Advanced AI", "Lifetime storage"] },
+        enterprise: { name: "Enterprise", price: "49", features: ["Team Workspaces", "Custom Bot branding", "SSO Auth", "API Access"] }
+    };
+
+    const activePlan = selectedPlanId ? PLANS[selectedPlanId] : null;
 
     useEffect(() => {
         const decoded = tokenManager.getUser();
@@ -148,10 +168,14 @@ export default function Dashboard() {
 
         const fetchData = async () => {
             try {
-                const data = await recordingsAPI.getRecordings();
-                setRecordings(data);
+                const [recordingsData, statusData] = await Promise.all([
+                    recordingsAPI.getRecordings(),
+                    authAPI.getStatus()
+                ]);
+                setRecordings(recordingsData);
+                setUser((prev: any) => ({ ...prev, plan: statusData.plan }));
             } catch (err) {
-                console.error("[Dashboard] Failed to fetch recordings:", err);
+                console.error("[Dashboard] Failed to fetch data:", err);
             } finally {
                 setLoading(false);
             }
@@ -351,6 +375,119 @@ export default function Dashboard() {
                                 <Trash2 className="w-3.5 h-3.5" /> Delete Permanently
                             </button>
                         </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+
+                {/* Buy / Checkout Modal */}
+                <Dialog open={checkoutOpen} onOpenChange={(open) => {
+                    setCheckoutOpen(open);
+                    if (!open && selectedPlanId) {
+                        // Clear the query param when closing
+                        const params = new URLSearchParams(searchParams.toString());
+                        params.delete("buy");
+                        router.replace(`/dashboard?${params.toString()}`);
+                    }
+                }}>
+                    <DialogContent className="sm:max-w-[500px] p-0 overflow-hidden border-none rounded-[40px] shadow-2xl">
+                        <div className="bg-primary p-8 text-white relative overflow-hidden">
+                            <div className="absolute top-0 right-0 p-4 opacity-20 rotate-12">
+                                <Sparkles className="w-32 h-32" />
+                            </div>
+                            <h2 className="text-3xl font-black mb-2 tracking-tight">Upgrade to {activePlan?.name || 'Pro'}</h2>
+                            <p className="text-white/80 text-sm font-medium">Unlock the full power of MeetingMind AI today.</p>
+                        </div>
+
+                        <div className="p-8 space-y-8 bg-card">
+                            <div className="space-y-4">
+                                <h3 className="text-[10px] font-black uppercase tracking-widest text-muted-foreground opacity-60">Plan Benefits</h3>
+                                <div className="grid grid-cols-1 gap-3">
+                                    {(activePlan?.features || PLANS.pro.features).map((f: string, i: number) => (
+                                        <div key={i} className="flex items-center gap-3">
+                                            <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center">
+                                                <Check className="w-3 h-3 text-primary" />
+                                            </div>
+                                            <span className="text-sm font-bold text-foreground/80">{f}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="bg-muted/30 p-6 rounded-3xl border border-border/40">
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="text-sm font-bold text-muted-foreground">Monthly Total</span>
+                                    <span className="text-2xl font-black text-primary">₹{activePlan?.price || '5'}</span>
+                                </div>
+                                <p className="text-[10px] text-muted-foreground leading-relaxed">
+                                    By upgrading, you agree to our terms of service. You can cancel your subscription at any time from settings.
+                                </p>
+                            </div>
+
+                            <div className="flex flex-col gap-3">
+                                <button
+                                    onClick={async () => {
+                                        try {
+                                            toast.info("Initializing secure payment...");
+
+                                            // 1. Create Order on our backend
+                                            const orderData = await paymentAPI.createOrder(selectedPlanId || 'pro');
+
+                                            if (!orderData.success) throw new Error("Could not create order");
+
+                                            const options = {
+                                                key: orderData.key_id,
+                                                amount: orderData.amount,
+                                                currency: orderData.currency,
+                                                name: "MeetingMind AI",
+                                                description: `Upgrade to ${selectedPlanId || 'Pro'} Plan`,
+                                                image: "/assets/icon128.png",
+                                                order_id: orderData.order_id,
+                                                handler: async function (response: any) {
+                                                    try {
+                                                        toast.success("Payment successful! Verifying...");
+
+                                                        // 2. Verify Payment on our backend
+                                                        const verifyRes = await paymentAPI.verifyPayment({
+                                                            ...response,
+                                                            planId: selectedPlanId || 'pro'
+                                                        });
+
+                                                        if (verifyRes.success) {
+                                                            toast.success("Plan upgraded successfully!");
+                                                            setCheckoutOpen(false);
+                                                            setTimeout(() => window.location.reload(), 1500);
+                                                        } else {
+                                                            toast.error("Verification failed. Please contact support.");
+                                                        }
+                                                    } catch (err) {
+                                                        toast.error("Error during verification.");
+                                                    }
+                                                },
+                                                prefill: {
+                                                    email: user.email,
+                                                    name: user.name
+                                                },
+                                                theme: {
+                                                    color: "#e07155"
+                                                }
+                                            };
+
+                                            const rzp = new (window as any).Razorpay(options);
+                                            rzp.open();
+
+                                        } catch (err) {
+                                            console.error("[Razorpay Error]", err);
+                                            toast.error("Failed to initialize payment. Check if Razorpay keys are set.");
+                                        }
+                                    }}
+                                    className="w-full bg-primary text-white py-4 rounded-2xl font-black text-lg shadow-xl shadow-primary/20 hover:scale-[1.02] transition-all flex items-center justify-center gap-2"
+                                >
+                                    <CreditCard className="w-5 h-5" /> Pay Now (Razorpay)
+                                </button>
+                                <div className="flex items-center justify-center gap-2 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+                                    <ShieldCheck className="w-3 h-3" /> Secure 256-bit SSL Encryption
+                                </div>
+                            </div>
+                        </div>
                     </DialogContent>
                 </Dialog>
             </SidebarInset>

@@ -39,6 +39,7 @@ export function NavUser({
     name: string
     email: string
     avatar: string
+    plan?: string
   }
 }) {
   const { isMobile } = useSidebar()
@@ -93,14 +94,16 @@ export function NavUser({
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={() => router.push("/dashboard/settings")} className="cursor-pointer">
                 <UserCircleIcon />
                 Account
               </DropdownMenuItem>
-              <DropdownMenuItem>
-                <CreditCardIcon />
-                Billing
-              </DropdownMenuItem>
+              {user.plan !== 'pro' && (
+                <DropdownMenuItem onClick={() => router.push("/dashboard?buy=pro")} className="cursor-pointer font-bold text-primary">
+                  <CreditCardIcon />
+                  Upgrade to Pro
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem>
                 <BellIcon />
                 Notifications
