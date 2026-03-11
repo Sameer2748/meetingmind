@@ -7,6 +7,7 @@ const users = pgTable('users', {
     avatar: text('avatar'),
     google_access_token: text('google_access_token'),
     cookies: jsonb('cookies'),
+    plan: text('plan').default('starter'),
     created_at: timestamp('created_at').defaultNow(),
 });
 
