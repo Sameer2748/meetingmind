@@ -19,6 +19,7 @@
     "axios": "^1.13.5",
     "bullmq": "^5.69.3",
     "cors": "^2.8.6",
+    "crypto": "^1.0.1",
     "dotenv": "^17.3.1",
     "drizzle-orm": "^0.45.1",
     "express": "^5.2.1",
@@ -31,7 +32,8 @@
     "puppeteer": "^24.37.3",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
-    "puppeteer-stream": "^3.0.22"
+    "puppeteer-stream": "^3.0.22",
+    "razorpay": "^2.9.6"
   },
   "devDependencies": {
     "drizzle-kit": "^0.31.9",

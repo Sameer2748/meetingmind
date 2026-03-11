@@ -1,5 +1,5 @@
 const { db, pool } = require('../db');
-const { users, recordings } = require('../db/schema');
+const { users, recordings, payments } = require('../db/schema');
 const { eq, desc, and } = require('drizzle-orm');
 
 class DatabaseService {
@@ -24,10 +24,20 @@ class DatabaseService {
             const existingUser = await this.db.select().from(users).where(eq(users.email, email)).limit(1);
             if (existingUser.length > 0) return existingUser[0];
 
-            const newUser = await this.db.insert(users).values({ email }).returning();
+            const newUser = await this.db.insert(users).values({ email, plan: 'starter' }).returning();
             return newUser[0];
         } catch (err) {
             console.error('[Database] [ERROR] Failed to find/create user:', err.message);
+            return null;
+        }
+    }
+
+    async getUser(email) {
+        try {
+            const result = await this.db.select().from(users).where(eq(users.email, email)).limit(1);
+            return result[0];
+        } catch (err) {
+            console.error('[Database] [ERROR] Failed to fetch user:', err.message);
             return null;
         }
     }
@@ -135,6 +145,53 @@ class DatabaseService {
             return true;
         } catch (err) {
             console.error('[Database] [ERROR] Failed to delete recording:', err.message);
+            return false;
+        }
+    }
+
+    async getUserStats(email) {
+        try {
+            const user = await this.getUser(email);
+            if (!user) return null;
+
+            const userRecordings = await this.db.select().from(recordings).where(eq(recordings.user_email, email));
+            return {
+                plan: user.plan || 'starter',
+                recordingsCount: userRecordings.length,
+                limit: user.plan === 'pro' ? Infinity : 5
+            };
+        } catch (err) {
+            console.error('[Database] [ERROR] Failed to fetch user stats:', err.message);
+            return null;
+        }
+    }
+
+    async upgradeUserPlan(email, plan) {
+        try {
+            await this.db.update(users)
+                .set({ plan })
+                .where(eq(users.email, email));
+            return true;
+        } catch (err) {
+            console.error('[Database] [ERROR] Failed to upgrade user plan:', err.message);
+            return false;
+        }
+    }
+
+    async savePayment(data) {
+        const { user_email, order_id, payment_id, amount, currency, plan } = data;
+        try {
+            await this.db.insert(payments).values({
+                user_email,
+                order_id,
+                payment_id,
+                amount,
+                currency: currency || 'INR',
+                plan
+            });
+            return true;
+        } catch (err) {
+            console.error('[Database] [ERROR] Failed to save payment record:', err.message);
             return false;
         }
     }

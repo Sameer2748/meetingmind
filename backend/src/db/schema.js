@@ -7,6 +7,7 @@ const users = pgTable('users', {
     avatar: text('avatar'),
     google_access_token: text('google_access_token'),
     cookies: jsonb('cookies'),
+    plan: text('plan').default('starter'), // starter or pro
     created_at: timestamp('created_at').defaultNow(),
 });
 
@@ -22,10 +23,24 @@ const recordings = pgTable('recordings', {
     transcript_words: jsonb('transcript_words'),
     status: text('status').default('pending'),
     duration: integer('duration').default(0),
+    share_token: text('share_token').unique(),
+    share_expires_at: timestamp('share_expires_at'),
+    created_at: timestamp('created_at').defaultNow(),
+});
+
+const payments = pgTable('payments', {
+    id: serial('id').primaryKey(),
+    user_email: text('user_email').notNull(),
+    order_id: text('order_id').notNull(),
+    payment_id: text('payment_id').notNull(),
+    amount: integer('amount').notNull(),
+    currency: text('currency').default('INR'),
+    plan: text('plan').notNull(),
     created_at: timestamp('created_at').defaultNow(),
 });
 
 module.exports = {
     users,
     recordings,
+    payments,
 };

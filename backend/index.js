@@ -28,6 +28,7 @@ app.use((req, res, next) => {
 app.use('/api/auth', require('./src/routes/authRoutes'));
 app.use('/api/recordings', require('./src/routes/recordingRoutes'));
 app.use('/api/bot', require('./src/routes/botRoutes'));
+app.use('/api/payments', require('./src/routes/paymentRoutes'));
 
 // Basic health check
 app.get('/health', (req, res) => {

@@ -59,5 +59,47 @@ router.post('/login', async (req, res) => {
         res.status(500).json({ error: 'Authentication failed' });
     }
 });
+// Get User Status (Plan, Count, etc)
+router.get('/status', async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'Auth header missing' });
+
+    const token = authHeader.split(' ')[1];
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        console.log(`[Auth] Checking status for: ${decoded.email}`);
+
+        // Ensure user exists (e.g. after DB reset)
+        const user = await dbService.findOrCreateUser(decoded.email);
+        if (!user) {
+            console.error(`[Auth] [ERROR] Could not find or create user: ${decoded.email}`);
+            return res.status(500).json({ error: 'User initialization failed' });
+        }
+
+        const stats = await dbService.getUserStats(decoded.email);
+        if (!stats) {
+            console.error(`[Auth] [ERROR] Stats returned null for: ${decoded.email}`);
+            return res.status(500).json({ error: 'Failed to fetch stats' });
+        }
+
+        res.json(stats);
+    } catch (err) {
+        console.error('[Auth] [ERROR] Token verification failed:', err.message);
+        res.status(401).json({ error: 'Invalid token' });
+    }
+});
+
+// Upgrade User (Mock purchase)
+router.post('/upgrade', async (req, res) => {
+    const { email, plan } = req.body;
+    if (!email || !plan) return res.status(400).json({ error: 'Email and plan required' });
+
+    try {
+        await dbService.upgradeUserPlan(email, plan);
+        res.json({ success: true, message: `Upgraded to ${plan}` });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to upgrade plan' });
+    }
+});
 
 module.exports = router;
