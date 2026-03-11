@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useMemo } from "react";
+import { useEffect, useState, useRef, useMemo, Suspense } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
     Clock,
@@ -124,7 +124,7 @@ function CardWaveformSeekBar({
     );
 }
 
-export default function Dashboard() {
+function DashboardContent() {
     const [recordings, setRecordings] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [user, setUser] = useState<any>(null);
@@ -493,6 +493,14 @@ export default function Dashboard() {
             </SidebarInset>
             <SidebarRail />
         </SidebarProvider >
+    );
+}
+
+export default function Dashboard() {
+    return (
+        <Suspense fallback={<div className="min-h-screen bg-background flex flex-col items-center justify-center"><Loader2 className="w-10 h-10 animate-spin text-primary" /></div>}>
+            <DashboardContent />
+        </Suspense>
     );
 }
 

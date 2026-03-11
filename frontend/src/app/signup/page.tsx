@@ -1,19 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { GoogleLogin } from "@react-oauth/google";
 import { toast } from "sonner";
-import { Brain, Eye, EyeOff, ArrowLeft, Check } from "lucide-react";
+import { Brain, Eye, EyeOff, ArrowLeft, Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { authAPI } from "@/lib/api";
 import { tokenManager } from "@/lib/auth/tokenManager";
 import { useEffect } from "react";
 
-export default function SignUpPage() {
+function SignUpContent() {
     const [name, setName] = useState("");
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
@@ -206,3 +206,12 @@ export default function SignUpPage() {
         </div>
     );
 }
+
+export default function SignUpPage() {
+    return (
+        <Suspense fallback={<div className="min-h-screen bg-background flex flex-col items-center justify-center"><Loader2 className="w-10 h-10 animate-spin text-primary" /></div>}>
+            <SignUpContent />
+        </Suspense>
+    );
+}
+
