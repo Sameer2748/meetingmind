@@ -234,6 +234,19 @@ router.get('/shared/:token/stream', async (req, res) => {
             return;
         }
 
+        if (recording.s3_url) {
+            const s3Url = new URL(recording.s3_url);
+            const key = decodeURIComponent(s3Url.pathname.substring(1));
+
+            const command = new GetObjectCommand({
+                Bucket: process.env.AWS_BUCKET_NAME,
+                Key: key,
+            });
+
+            const signedUrl = await getSignedUrl(storageService.client, command, { expiresIn: 3600 });
+            return res.redirect(signedUrl);
+        }
+
         res.status(404).json({ error: 'Resource not available' });
     } catch (err) {
         console.error('[Shared Stream Error]', err.message);
