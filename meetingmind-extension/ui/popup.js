@@ -18,6 +18,14 @@ const btnLogout = document.getElementById('btn-logout')
 const userEmailEl = document.getElementById('user-email')
 const userAvatarEl = document.getElementById('user-avatar')
 
+// Stats elements
+const planStatusCard = document.getElementById('plan-status-card')
+const planNameEl = document.getElementById('plan-name')
+const planUsageEl = document.getElementById('plan-usage')
+const planProgressEl = document.getElementById('plan-progress')
+const limitReachedMsg = document.getElementById('limit-reached-msg')
+const btnUpgrade = document.getElementById('btn-upgrade')
+
 async function checkAuth() {
     return new Promise((resolve) => {
         chrome.storage.local.get(['userEmail', 'authToken'], (data) => {
@@ -40,6 +48,9 @@ function showLoggedIn(email) {
 
     userEmailEl.textContent = email
     userAvatarEl.textContent = email.charAt(0).toUpperCase()
+
+    // Fetch limits immediately
+    updatePlanStatus();
 }
 
 function showLoggedOut() {
@@ -47,8 +58,62 @@ function showLoggedOut() {
 
     loggedOutView.classList.remove('hidden')
     loggedInView.classList.add('hidden')
+    if (planStatusCard) planStatusCard.classList.add('hidden')
 
-    chrome.storage.local.remove(['userEmail', 'authToken'])
+    chrome.storage.local.remove(['userEmail', 'authToken', 'userStats'])
+}
+
+async function updatePlanStatus() {
+    chrome.storage.local.get(['authToken', 'userEmail'], async (data) => {
+        if (!data.authToken) return;
+
+        try {
+            const response = await fetch(`${self.CONFIG.API_BASE_URL}/api/auth/status`, {
+                headers: {
+                    'Authorization': `Bearer ${data.authToken}`
+                }
+            });
+
+            if (response.ok) {
+                const stats = await response.json();
+                renderPlanStatus(stats);
+                chrome.storage.local.set({ userStats: stats });
+            }
+        } catch (err) {
+            console.error('[Popup] Status check failed:', err);
+        }
+    });
+}
+
+function renderPlanStatus(stats) {
+    if (!planStatusCard) return;
+
+    planStatusCard.classList.remove('hidden');
+
+    const isPro = stats.plan === 'pro';
+    planNameEl.textContent = isPro ? 'Pro Plan' : 'Starter Plan';
+
+    if (isPro) {
+        planUsageEl.textContent = `${stats.recordingsCount} Recordings`;
+        planProgressEl.style.width = '100%';
+        limitReachedMsg.classList.add('hidden');
+        btnUpgrade.classList.add('hidden');
+    } else {
+        const count = stats.recordingsCount || 0;
+        const limit = stats.limit || 5;
+        planUsageEl.textContent = `${count} / ${limit} Meetings`;
+
+        const percent = Math.min((count / limit) * 100, 100);
+        planProgressEl.style.width = `${percent}%`;
+
+        if (count >= limit) {
+            limitReachedMsg.classList.remove('hidden');
+            planProgressEl.style.background = '#ef4444';
+        } else {
+            limitReachedMsg.classList.add('hidden');
+            planProgressEl.style.background = '#e07155';
+        }
+    }
 }
 
 // ── Google Login Logic (BACKGROUND FLOW) ──────────
@@ -78,6 +143,7 @@ btnLogout.addEventListener('click', () => {
 // ── Init ────────────────────────────────────────────────
 async function init() {
     await checkAuth()
+    updatePlanStatus()
 
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
     const isGoogleMeet = tab?.url?.startsWith('https://meet.google.com/')

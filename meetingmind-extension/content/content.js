@@ -133,6 +133,18 @@ function injectToolbarButton() {
     const btn = button;
     const dot = statusDot;
 
+    // Check plan limit
+    chrome.storage.local.get(['userStats'], (data) => {
+        const stats = data.userStats;
+        if (stats && stats.plan === 'starter' && stats.recordingsCount >= stats.limit) {
+            btn.disabled = true;
+            btn.style.filter = 'grayscale(1)';
+            btn.style.opacity = '0.5';
+            btn.title = 'Limit Reached (5 Meetings). Please upgrade to record more.';
+            iconBox.style.backgroundColor = '#64748b'; // Gray
+        }
+    });
+
     btn.onclick = (e) => {
         e.stopPropagation();
         e.preventDefault();
@@ -387,4 +399,28 @@ setInterval(checkMeeting, 2000);
 setInterval(() => {
     injectToolbarButton();
     updateUIState();
+
+    // Periodically re-check limits to update button if user upgraded in another tab
+    chrome.storage.local.get(['userStats'], (data) => {
+        const stats = data.userStats;
+        const btn = document.querySelector('#mm-button-element');
+        const iconBox = btn?.parentElement?.querySelector('div');
+
+        if (btn && stats) {
+            const limitReached = stats.plan === 'starter' && stats.recordingsCount >= stats.limit;
+            if (limitReached && !isRecording) {
+                btn.disabled = true;
+                if (iconBox) iconBox.style.backgroundColor = '#64748b';
+                btn.style.filter = 'grayscale(1)';
+                btn.style.opacity = '0.5';
+                btn.title = 'Limit Reached (5 Meetings). Please upgrade to record more.';
+            } else if (!isRecording) {
+                btn.disabled = false;
+                if (iconBox) iconBox.style.backgroundColor = '#e07155';
+                btn.style.filter = 'none';
+                btn.style.opacity = '1';
+                btn.title = 'Start Recording with MeetingMind';
+            }
+        }
+    });
 }, 3000);

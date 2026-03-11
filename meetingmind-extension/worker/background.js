@@ -8,7 +8,29 @@ let pendingMicDataUrl = null
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === 'install') console.log('[Background] First time installed!')
   if (details.reason === 'update') console.log('[Background] Extension updated!')
+  refreshUserStats();
 })
+
+// Periodically refresh stats (every 5 mins)
+setInterval(refreshUserStats, 5 * 60 * 1000);
+
+async function refreshUserStats() {
+  const data = await chrome.storage.local.get(['authToken']);
+  if (!data.authToken) return;
+
+  try {
+    const res = await fetch(`${CONFIG.API_BASE_URL}/api/auth/status`, {
+      headers: { 'Authorization': `Bearer ${data.authToken}` }
+    });
+    if (res.ok) {
+      const stats = await res.json();
+      await chrome.storage.local.set({ userStats: stats });
+      console.log('[Background] 📊 User stats refreshed:', stats.plan, stats.recordingsCount);
+    }
+  } catch (err) {
+    console.warn('[Background] Stats refresh failed:', err.message);
+  }
+}
 
 // Handle messages
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -235,6 +257,7 @@ async function handleGoogleLogin(sendResponse) {
       });
 
       console.log('[Background] ✅ Auth setup complete');
+      await refreshUserStats(); // Fetch initial stats
       sendResponse({ ok: true, email: userData.email });
     } else {
       throw new Error(setupData.error || 'Backend setup failed');
